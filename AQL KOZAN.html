@@ -781,31 +781,33 @@ function loadPeople()     { try { return JSON.parse(localStorage.getItem(PEOPLE_
 function loadCustomers()  { try { return JSON.parse(localStorage.getItem(CUSTOMERS_KEY) || '[]'); } catch(_){ return []; } }
 
 async function savePeople(p) {
+  // Always save to localStorage first — this is the source of truth
   try { localStorage.setItem(PEOPLE_KEY, JSON.stringify(p)); } catch(_) {}
+  // Sync to Supabase: delete all then reinsert (wrapped safely)
   if (typeof sb !== 'undefined') {
     try {
-      // Build the full desired rows
+      await sb.rest('DELETE', 'people', null, { name: 'neq.__placeholder__' });
       const rows = [];
       for (const [role, names] of Object.entries(p)) {
         for (const name of names) rows.push({ role, name });
       }
-      // Delete only rows that are no longer in the list, then upsert existing ones
-      // Safer: delete all then re-insert, but wrapped in a check so we only
-      // delete AFTER we know we have rows to re-insert (or intentionally empty)
-      await sb.rest('DELETE', 'people', null, { id: 'neq.00000000-0000-0000-0000-000000000000' });
       if (rows.length) await sb.rest('POST', 'people', rows);
-    } catch (e) { console.warn('[AQL] People sync failed:', e.message); }
+      console.log('[AQL] ✅ People synced to Supabase');
+    } catch (e) { console.warn('[AQL] People sync failed (localStorage is still saved):', e.message); }
   }
 }
 
 async function saveCustomers(list) {
+  // Always save to localStorage first — this is the source of truth
   try { localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(list)); } catch(_) {}
+  // Sync to Supabase: delete all then reinsert (wrapped safely)
   if (typeof sb !== 'undefined') {
     try {
-      await sb.rest('DELETE', 'customers', null, { id: 'neq.00000000-0000-0000-0000-000000000000' });
+      await sb.rest('DELETE', 'customers', null, { name: 'neq.__placeholder__' });
       const rows = list.map(name => ({ name }));
       if (rows.length) await sb.rest('POST', 'customers', rows);
-    } catch (e) { console.warn('[AQL] Customers sync failed:', e.message); }
+      console.log('[AQL] ✅ Customers synced to Supabase');
+    } catch (e) { console.warn('[AQL] Customers sync failed (localStorage is still saved):', e.message); }
   }
 }
 
@@ -2424,12 +2426,19 @@ async function loadPeopleFromSupabase() {
   try {
     const rows = await sb.rest('GET', 'people', null, { select: 'role,name' });
     if (rows && rows.length) {
-      const p = { qc: [], dept: [], qa: [], supplier: [] };
-      rows.forEach(r => { if (p[r.role]) p[r.role].push(r.name); });
-      localStorage.setItem(PEOPLE_KEY, JSON.stringify(p));
-      return p;
+      // Merge: start with Supabase data, then add any localStorage-only entries
+      const fromSupabase = { qc: [], dept: [], qa: [], supplier: [] };
+      rows.forEach(r => { if (fromSupabase[r.role]) fromSupabase[r.role].push(r.name); });
+      const fromLocal = loadPeople();
+      const merged = { qc: [], dept: [], qa: [], supplier: [] };
+      for (const key of Object.keys(merged)) {
+        const combined = [...new Set([...(fromSupabase[key]||[]), ...(fromLocal[key]||[])])];
+        merged[key] = combined;
+      }
+      localStorage.setItem(PEOPLE_KEY, JSON.stringify(merged));
+      return merged;
     }
-    // Supabase returned empty — use whatever is in localStorage (don't overwrite)
+    // Supabase returned empty — trust localStorage completely
   } catch (e) { console.warn('[AQL] People load failed:', e.message); }
   return loadPeople();
 }
@@ -2438,11 +2447,14 @@ async function loadCustomersFromSupabase() {
   try {
     const rows = await sb.rest('GET', 'customers', null, { select: 'name', order: 'name.asc' });
     if (rows && rows.length) {
-      const list = rows.map(r => r.name);
-      localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(list));
-      return list;
+      // Merge: combine Supabase + localStorage, deduplicate, sort
+      const fromSupabase = rows.map(r => r.name);
+      const fromLocal = loadCustomers();
+      const merged = [...new Set([...fromSupabase, ...fromLocal])].sort();
+      localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(merged));
+      return merged;
     }
-    // Supabase returned empty — use whatever is in localStorage (don't overwrite)
+    // Supabase returned empty — trust localStorage completely
   } catch (e) { console.warn('[AQL] Customers load failed:', e.message); }
   return loadCustomers();
 }
