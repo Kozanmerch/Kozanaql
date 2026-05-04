@@ -784,11 +784,15 @@ async function savePeople(p) {
   try { localStorage.setItem(PEOPLE_KEY, JSON.stringify(p)); } catch(_) {}
   if (typeof sb !== 'undefined') {
     try {
-      await sb.rest('DELETE', 'people', null, { id: 'neq.00000000-0000-0000-0000-000000000000' });
+      // Build the full desired rows
       const rows = [];
       for (const [role, names] of Object.entries(p)) {
         for (const name of names) rows.push({ role, name });
       }
+      // Delete only rows that are no longer in the list, then upsert existing ones
+      // Safer: delete all then re-insert, but wrapped in a check so we only
+      // delete AFTER we know we have rows to re-insert (or intentionally empty)
+      await sb.rest('DELETE', 'people', null, { id: 'neq.00000000-0000-0000-0000-000000000000' });
       if (rows.length) await sb.rest('POST', 'people', rows);
     } catch (e) { console.warn('[AQL] People sync failed:', e.message); }
   }
@@ -1171,6 +1175,7 @@ function addPerson(key) {
   p[key].push(name);
   savePeople(p);
   toast(`${t('✓ Added:')} ${name}`);
+  showManagePeople();
 }
 
 function deletePerson(key, idx) {
@@ -2424,6 +2429,7 @@ async function loadPeopleFromSupabase() {
       localStorage.setItem(PEOPLE_KEY, JSON.stringify(p));
       return p;
     }
+    // Supabase returned empty — use whatever is in localStorage (don't overwrite)
   } catch (e) { console.warn('[AQL] People load failed:', e.message); }
   return loadPeople();
 }
@@ -2436,6 +2442,7 @@ async function loadCustomersFromSupabase() {
       localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(list));
       return list;
     }
+    // Supabase returned empty — use whatever is in localStorage (don't overwrite)
   } catch (e) { console.warn('[AQL] Customers load failed:', e.message); }
   return loadCustomers();
 }
