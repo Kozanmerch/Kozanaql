@@ -1830,15 +1830,24 @@ function editorDraw() {
   const drawW = swapped ? srcH : srcW;
   const drawH = swapped ? srcW : srcH;
 
-  // Fit to container
+  // Fit to container in CSS pixels first
   const container = document.getElementById('cam-editor-img');
   const maxW = container.clientWidth  || window.innerWidth;
   const maxH = container.clientHeight || (window.innerHeight - 160);
-  const scale = Math.min(maxW / drawW, maxH / drawH, 1);
-  canvas.width  = Math.round(drawW * scale);
-  canvas.height = Math.round(drawH * scale);
-  canvas.style.width  = canvas.width  + 'px';
-  canvas.style.height = canvas.height + 'px';
+  const cssScale = Math.min(maxW / drawW, maxH / drawH, 1);
+
+  // Multiply canvas backing store by DPR so it has real physical pixels.
+  // Without this, a 3× DPR phone draws at 1/3 resolution and looks blurry.
+  const dpr = window.devicePixelRatio || 1;
+  const physScale = cssScale * dpr;
+
+  const cssW = Math.round(drawW * cssScale);
+  const cssH = Math.round(drawH * cssScale);
+
+  canvas.width  = Math.round(drawW * physScale);
+  canvas.height = Math.round(drawH * physScale);
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
 
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = true;
@@ -1849,10 +1858,10 @@ function editorDraw() {
   ctx.rotate(rot * Math.PI / 180);
   if (camState.flipH) ctx.scale(-1, 1);
   if (camState.flipV) ctx.scale(1, -1);
-  ctx.drawImage(img, -drawW * scale / 2, -drawH * scale / 2, drawW * scale, drawH * scale);
+  ctx.drawImage(img, -drawW * physScale / 2, -drawH * physScale / 2, drawW * physScale, drawH * physScale);
   ctx.restore();
 
-  // Draw crop overlay
+  // Crop overlay — positioned in CSS px space
   const overlay = document.getElementById('crop-overlay');
   if (camState.cropActive && camState.cropRect) {
     const r = camState.cropRect;
@@ -2015,7 +2024,10 @@ async function editorSave() {
   if (camState.cropActive && camState.cropRect) {
     const r = camState.cropRect;
     const srcCanvas = document.getElementById('editor-canvas');
-    const scale = fullW / srcCanvas.width;
+    // r.x/y/w/h are in CSS pixels; srcCanvas.width is in physical pixels (includes DPR).
+    // We need to map CSS px → full-resolution px, so use the CSS size (style.width).
+    const cssPxW = parseFloat(srcCanvas.style.width) || srcCanvas.width;
+    const scale = fullW / cssPxW;
     const cx = Math.round(r.x * scale), cy = Math.round(r.y * scale);
     const cw = Math.round(r.w * scale), ch = Math.round(r.h * scale);
     const cropped = document.createElement('canvas');
