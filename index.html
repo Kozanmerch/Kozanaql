@@ -3157,8 +3157,9 @@ const INTERIM_CTRL_ITEMS = [
 // IN-LINE — form render
 // ──────────────────────────────────────────────
 function camOpenInterim() {
-  camOpen(url => {
-    updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url, label: '' }); });
+  camOpen(async url => {
+    const compressed = await compressPhotoUrl(url, '');
+    updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url: compressed, label: '' }); });
     _refreshInterimPhotoGrid();
     toast(t('📸 Photo saved'));
   }, '');
@@ -3328,8 +3329,9 @@ async function addInterimPhotos(input) {
     const reader = new FileReader();
     reader.onload = e => {
       camState.label  = '';   // label assigned after save in interim grid
-      camState.onSave = url => {
-        updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url, label: '' }); });
+      camState.onSave = async url => {
+        const compressed = await compressPhotoUrl(url, '');
+        updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url: compressed, label: '' }); });
         _refreshInterimPhotoGrid();
         toast(t('📸 Photo saved'));
       };
@@ -3342,8 +3344,9 @@ async function addInterimPhotos(input) {
   for (const file of files) {
     const reader = new FileReader();
     await new Promise(resolve => {
-      reader.onload = e => {
-        updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url: e.target.result, label: '' }); });
+      reader.onload = async e => {
+        const compressed = await compressPhotoUrl(e.target.result, '');
+        updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url: compressed, label: '' }); });
         resolve();
       };
       reader.readAsDataURL(file);
@@ -3447,7 +3450,7 @@ function buildInterimReportHTML(ir) {
             '<div style="width:100%;height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f9f9f9">' +
               '<img src="' + (p.url||p) + '" style="max-width:100%;max-height:240px;width:auto;height:auto;display:block;object-fit:contain">' +
             '</div>' +
-            (p.label ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%">' + p.label + '</div>' : '') +
+            (p.label ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%">' + t(p.label) + '</div>' : '') +
           '</div>'
         ).join('') +
         '</div></div>';
@@ -4321,8 +4324,8 @@ function changeDefect(code, type, delta) {
 // ══════════════════════════════════════════════════════════════════════
 
 function camOpenFinalPhoto() {
-  camOpen(url => {
-    addPhotoToReport(url, state.photoLabel);
+  camOpen(async url => {
+    await addPhotoToReport(url, state.photoLabel);
     renderStep4(state.currentReport);
     toast(t('📸 Photo saved:') + ' ' + state.photoLabel);
   }, state.photoLabel);
@@ -4331,10 +4334,10 @@ function camOpenFinalPhoto() {
 function renderStep4(r) {
   const photosHTML = (r.photos||[]).map((p,i) => `
     <div class="photo-thumb">
-      <div class="pt-img-wrap"><img src="${p.url}" alt="${p.label}"></div>
+      <div class="pt-img-wrap"><img src="${p.url}" alt="${t(p.label||'')}"></div>
       <button class="pt-edit" onclick="editPhoto(${i})" title="Edit">✏</button>
       <div class="pt-label">
-        <input value="${esc(p.label||'')}" placeholder="Label…"
+        <input value="${esc(t(p.label||''))}" placeholder="Label…"
           oninput="renamePhoto(${i},this.value)" onclick="event.stopPropagation()">
       </div>
       <button class="pt-del" onclick="deletePhoto(${i})">✕</button>
@@ -4389,8 +4392,8 @@ function uploadPhoto(input) {
     const reader = new FileReader();
     reader.onload = e => {
       camState.label  = state.photoLabel || '';
-      camState.onSave = url => {
-        addPhotoToReport(url, state.photoLabel);
+      camState.onSave = async url => {
+        await addPhotoToReport(url, state.photoLabel);
         renderStep4(state.currentReport);
         toast(t('📸 Photo saved:') + ' ' + state.photoLabel);
       };
@@ -4402,8 +4405,8 @@ function uploadPhoto(input) {
   // Multiple → add directly, no processing
   files.forEach(file => {
     const reader = new FileReader();
-    reader.onload = e => {
-      addPhotoToReport(e.target.result, state.photoLabel);
+    reader.onload = async e => {
+      await addPhotoToReport(e.target.result, state.photoLabel);
       renderStep4(state.currentReport);
     };
     reader.onerror = () => toast(t('⚠️ Could not read photo'));
@@ -4411,10 +4414,38 @@ function uploadPhoto(input) {
   });
 }
 
-function addPhotoToReport(url, label) {
+// ── Photo compression helper ──────────────────────────────────────────
+// Barcode / Trim labels are kept lossless (same logic as editorSave).
+// Everything else is re-encoded as JPEG at 85% — invisible quality loss
+// for garment shots but cuts file size significantly.
+function isProtectedPhotoLabel(label) {
+  if (!label) return false;
+  const l = label.toLowerCase();
+  return l.includes('barcode') || l.includes('barkod') || l.includes('trim') || l.includes('aksesuar');
+}
+
+function compressPhotoUrl(url, label) {
+  if (isProtectedPhotoLabel(label)) return Promise.resolve(url);
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width  = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => resolve(url); // fallback: keep original
+    img.src = url;
+  });
+}
+
+async function addPhotoToReport(url, label) {
+  const compressed = await compressPhotoUrl(url, label);
   updateReport(r => {
     if (!r.photos) r.photos = [];
-    r.photos.push({ url, label, ts: Date.now() });
+    r.photos.push({ url: compressed, label, ts: Date.now() });
   });
   renderPhotoGrid();
 }
@@ -4450,10 +4481,10 @@ function renderPhotoGrid() {
   const r = state.currentReport;
   grid.innerHTML = (r.photos||[]).map((p,i) => `
     <div class="photo-thumb">
-      <div class="pt-img-wrap"><img src="${p.url}" alt="${p.label}"></div>
+      <div class="pt-img-wrap"><img src="${p.url}" alt="${t(p.label||'')}"></div>
       <button class="pt-edit" onclick="editPhoto(${i})" title="Edit">✏</button>
       <div class="pt-label">
-        <input value="${esc(p.label||'')}" placeholder="Label…"
+        <input value="${esc(t(p.label||''))}" placeholder="Label…"
           oninput="renamePhoto(${i},this.value)" onclick="event.stopPropagation()">
       </div>
       <button class="pt-del" onclick="deletePhoto(${i})">✕</button>
@@ -4588,7 +4619,7 @@ function renderStep6(r) {
         ${allPhotos.map(p=>`
           <div style="break-inside:avoid;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
             <img src="${p.url}" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block">
-            <div style="font-size:13px;font-weight:600;text-align:center;padding:4px 6px;background:#f9fafb;color:#374151">${p.label||''}</div>
+            <div style="font-size:13px;font-weight:600;text-align:center;padding:4px 6px;background:#f9fafb;color:#374151">${t(p.label||'')}</div>
           </div>`).join('')}
       </div>`
     : `<div style="text-align:center;color:#999;padding:20px">${t('No photos')}</div>`;
@@ -4738,8 +4769,9 @@ function _buildFinalPhotoAndNotesPages(r) {
       ? '<div class="section-bar" style="margin-bottom:8px">PHOTOS · Fotoğraflar (' + allPhotos.length + ')</div>'
       : '';
     var cells = chunk.map(function(p) {
-      var label = p.label
-        ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%">' + p.label + '</div>'
+      var displayLabel = p.label ? (typeof t === 'function' ? t(p.label) : p.label) : '';
+      var label = displayLabel
+        ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%">' + displayLabel + '</div>'
         : '';
       return '<div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;background:#f9f9f9;display:flex;flex-direction:column;break-inside:avoid;page-break-inside:avoid">'
         + '<div style="width:100%;height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f9f9f9">'
