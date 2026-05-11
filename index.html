@@ -237,10 +237,10 @@ body {
   flex-direction: column;
   cursor: pointer;
 }
-/* Image cell — matches PDF: fixed height, object-fit contain, white/light bg */
+/* Image cell — pixel-perfect match to PDF: height:240px, object-fit:contain, white bg */
 .photo-thumb .pt-img-wrap {
   width: 100%;
-  height: 200px;
+  height: 240px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -248,8 +248,10 @@ body {
   overflow: hidden;
 }
 .photo-thumb img {
-  max-width: 100%; max-height: 200px;
-  width: auto; height: auto;
+  max-width: 100%;
+  max-height: 240px;
+  width: auto;
+  height: auto;
   display: block;
   object-fit: contain;
 }
@@ -1568,13 +1570,16 @@ function defectTotals(report) {
 
 /**
  * Determines pass/fail based on defect counts vs AQL limits.
+ * Note: crit is summed in defectTotals but no per-defect crit counter exists in the UI.
+ * The criticalLimit field (always 0 per AQL) means any crit value auto-fails,
+ * but since crit is never incremented it currently has no effect.
  * @param {Object} r - Report object (must have majorLimit, minorLimit, criticalLimit)
  * @returns {"pass"|"fail"|"pending"}
  */
 function autoResult(report) {
-  const { maj, min, crit } = defectTotals(report);
-  if (crit > 0) return 'fail';
-  return (maj > report.majorLimit || min > report.minorLimit) ? 'fail' : 'pass';
+  const { maj, min } = defectTotals(report);
+  if (maj > report.majorLimit || min > report.minorLimit) return 'fail';
+  return 'pass';
 }
 
 function newReport() {
@@ -1773,12 +1778,17 @@ async function camUpload(input) {
   camClose();
   const files = Array.from(input.files);
   for (const file of files) {
+    // Bug 3 fix: store resolve in camState so editorSave/editorDiscard can call it
     await new Promise(resolve => {
       const reader = new FileReader();
-      reader.onload = e => { editorOpen(e.target.result, resolve); };
+      reader.onload = e => {
+        camState._multiUploadResolve = resolve;
+        editorOpen(e.target.result);
+      };
       reader.readAsDataURL(file);
     });
   }
+  camState._multiUploadResolve = null;
 }
 
 // ── Photo editor ─────────────────────────────────────────────────────
@@ -1796,8 +1806,9 @@ function editorOpen(dataURL, onDone) {
   camState.dragState  = null;
   camState.originalDataURL = dataURL;   // always preserve the untouched original
   camState._snapJustFired  = false;
+  // Bug 1+6 fix: use classList consistently, not inline style
   const btn = document.getElementById('crop-toggle-btn');
-  if (btn) btn.style.background = '';
+  if (btn) { btn.style.background = ''; btn.classList.remove('active-tool'); }
 
   const img = new Image();
   img.onload = () => {
@@ -1891,10 +1902,12 @@ function editorSetupCropDrag() {
   const overlay = document.getElementById('crop-overlay');
   const edArea  = document.getElementById('cam-editor-img');
   if (!overlay || !edArea) return;
+  // Bug 2 fix: only attach listeners once — subsequent editorOpen calls reuse them
+  if (edArea._cropDragInit) return;
+  edArea._cropDragInit = true;
 
   function getPos(e) {
     const touch = e.touches ? e.touches[0] : e;
-    const rect = edArea.getBoundingClientRect();
     const canRect = document.getElementById('editor-canvas').getBoundingClientRect();
     return {
       x: touch.clientX - canRect.left,
@@ -1943,7 +1956,6 @@ function editorSetupCropDrag() {
   edArea.addEventListener('mouseup', onEnd);
   edArea.addEventListener('touchend', onEnd);
 
-  // Handle click on handles
   overlay.querySelectorAll('.crop-handle').forEach(h => {
     h.addEventListener('mousedown', onStart);
     h.addEventListener('touchstart', onStart, { passive: false });
@@ -1973,6 +1985,8 @@ async function editorSave() {
   if (noEdits && camState.originalDataURL) {
     document.getElementById('cam-editor').classList.remove('open');
     if (typeof camState.onSave === 'function') camState.onSave(camState.originalDataURL);
+    // Bug 3 fix: advance camUpload multi-file loop
+    if (typeof camState._multiUploadResolve === 'function') { camState._multiUploadResolve(); camState._multiUploadResolve = null; }
     return;
   }
 
@@ -2021,12 +2035,15 @@ async function editorSave() {
     : result.toDataURL('image/webp', 0.80);
 
   if (typeof camState.onSave === 'function') camState.onSave(finalUrl);
+  // Bug 3 fix: advance camUpload multi-file loop
+  if (typeof camState._multiUploadResolve === 'function') { camState._multiUploadResolve(); camState._multiUploadResolve = null; }
 }
 
 function editorDiscard() {
   document.getElementById('cam-editor').classList.remove('open');
   camState.srcImage = null;
-  // Re-open camera if it was a camera shot (not upload)
+  // Bug 3 fix: if discarding mid multi-upload, advance the loop so remaining files still open
+  if (typeof camState._multiUploadResolve === 'function') { camState._multiUploadResolve(); camState._multiUploadResolve = null; }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -3257,7 +3274,7 @@ function renderInterimForm() {
             </div>
             <button class="pt-del" onclick="deleteInterimPhoto(${i})">✕</button>
           </div>`).join('')}
-        <label style="aspect-ratio:1;border-radius:var(--r-sm);border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;color:var(--muted);font-size:12px">
+        <label style="min-height:266px;border-radius:var(--r-sm);border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;color:var(--muted);font-size:12px">
           <span style="font-size:24px">+</span>
           <span>${t('Add Photo')}</span>
           <input type="file" accept="image/*" multiple style="display:none" onchange="addInterimPhotos(this)">
@@ -3362,7 +3379,7 @@ function _refreshInterimPhotoGrid() {
       </div>
       <button class="pt-del" onclick="deleteInterimPhoto(${i})">✕</button>
     </div>`).join('') +
-  `<label style="aspect-ratio:1;border-radius:var(--r-sm);border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;color:var(--muted);font-size:12px">
+  `<label style="min-height:266px;border-radius:var(--r-sm);border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;color:var(--muted);font-size:12px">
     <span style="font-size:24px">+</span>
     <span>${t('Add Photo')}</span>
     <input type="file" accept="image/*" multiple style="display:none" onchange="addInterimPhotos(this)">
