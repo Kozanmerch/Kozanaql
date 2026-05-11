@@ -990,7 +990,7 @@ const t = s => uiLang === 'tr' && TR[s] ? TR[s] : s;
 //               Requires coordinated update of Supabase column names too.
 // TODO(medium): Add unit tests for getAQLLimits(), defectTotals(), autoResult()
 // TODO(low):    Use i18next instead of the hand-rolled TR dictionary
-// TODO(low):    Add request deduplication to Supabase sync calls
+// TODO(low):    Add request deduplication to Supabase sync calls — DONE ✓
 // ────────────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1035,6 +1035,45 @@ function updateReport(fn) {
   const idx = state.reports.findIndex(r => r.id === state.currentReport.id);
   if (idx >= 0) state.reports[idx] = state.currentReport;
   persistReports();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// SUPABASE SYNC — Request deduplication
+// Tracks a lightweight hash of each record's metadata so we only upsert
+// rows that have actually changed since the last successful sync.
+// Key: record id  →  Value: JSON-serialised metadata hash (string)
+// ══════════════════════════════════════════════════════════════════════
+
+const _syncCache = {
+  reports:   {},   // id → hash
+  interim:   {},   // id → hash
+  checklists:{},   // id → hash
+};
+
+/**
+ * Returns a cheap string fingerprint of a row's serialisable metadata.
+ * Photos are always stripped before calling this.
+ */
+function _rowHash(row) {
+  return JSON.stringify(row);
+}
+
+/**
+ * Returns only the rows whose hash differs from the last synced value,
+ * and updates the cache for those rows.
+ * @param {'reports'|'interim'|'checklists'} bucket
+ * @param {Array<{id:string}>} rows  — already photo-stripped row objects
+ */
+function _dedupe(bucket, rows) {
+  const changed = [];
+  for (const row of rows) {
+    const h = _rowHash(row);
+    if (_syncCache[bucket][row.id] !== h) {
+      _syncCache[bucket][row.id] = h;
+      changed.push(row);
+    }
+  }
+  return changed;
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1180,16 +1219,23 @@ async function persistReports() {
     toast(t('⚠️ Storage critically full. Please export reports as PDF and clear storage.'), 8000);
   }
 
-  // Sync metadata to Supabase (no photos in row)
+  // Sync metadata to Supabase (no photos in row) — skip unchanged rows
   if (typeof sb !== 'undefined') {
-    for (const r of state.reports) {
-      try {
-        const row = reportToRow(r);
-        await sb.rest('POST', 'reports', row, { on_conflict: 'id' });
-        console.log('[AQL] ✅ Synced report:', r.id);
-      } catch (e) {
-        console.error('[AQL] ❌ Failed to sync report', r.id, e.message);
+    const rows    = state.reports.map(r => reportToRow(r));
+    const toSync  = _dedupe('reports', rows);
+    if (toSync.length) {
+      for (const row of toSync) {
+        try {
+          await sb.rest('POST', 'reports', row, { on_conflict: 'id' });
+          console.log('[AQL] ✅ Synced report:', row.id);
+        } catch (e) {
+          // Evict from cache so it retries next time
+          delete _syncCache.reports[row.id];
+          console.error('[AQL] ❌ Failed to sync report', row.id, e.message);
+        }
       }
+    } else {
+      console.log('[AQL] ✓ Reports: no changes to sync');
     }
   }
 }
@@ -1233,10 +1279,17 @@ async function saveInterimReports() {
   try { localStorage.setItem(INTERIM_KEY, JSON.stringify(stripped)); } catch(_) {}
 
   if (typeof sb !== 'undefined') {
-    for (const ir of state.interimReports) {
-      try {
-        await sb.rest('POST', 'interim_reports', interimToRow(ir), { on_conflict: 'id' });
-      } catch(e) { console.warn('[AQL] Interim sync failed:', e.message); }
+    const rows   = state.interimReports.map(ir => interimToRow(ir));
+    const toSync = _dedupe('interim', rows);
+    if (toSync.length) {
+      for (const row of toSync) {
+        try {
+          await sb.rest('POST', 'interim_reports', row, { on_conflict: 'id' });
+        } catch(e) {
+          delete _syncCache.interim[row.id];
+          console.warn('[AQL] Interim sync failed:', e.message);
+        }
+      }
     }
   }
 }
@@ -1346,10 +1399,17 @@ function loadChecklists() { try { return JSON.parse(localStorage.getItem(CHECKLI
 async function saveChecklists() {
   try { localStorage.setItem(CHECKLIST_KEY, JSON.stringify(state.checklists)); } catch(_) {}
   if (typeof sb !== 'undefined') {
-    for (const cl of state.checklists) {
-      try {
-        await sb.rest('POST', 'checklists', checklistToRow(cl), { on_conflict: 'id' });
-      } catch(e) { console.warn('[AQL] Checklist sync failed:', e.message); }
+    const rows   = state.checklists.map(cl => checklistToRow(cl));
+    const toSync = _dedupe('checklists', rows);
+    if (toSync.length) {
+      for (const row of toSync) {
+        try {
+          await sb.rest('POST', 'checklists', row, { on_conflict: 'id' });
+        } catch(e) {
+          delete _syncCache.checklists[row.id];
+          console.warn('[AQL] Checklist sync failed:', e.message);
+        }
+      }
     }
   }
 }
@@ -4890,8 +4950,6 @@ async function downloadFinalPDF() {
 
 const SUPABASE_URL      = 'https://kbfkfipacaagtmscvliu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiZmtmaXBhY2FhZ3Rtc2N2bGl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NDAwMjQsImV4cCI6MjA5MzAxNjAyNH0.y72UCdXJeZpP-7jpwAQ_9A1TxvlptCvdx9Oxgw4DADE';
-const PHOTO_BUCKET      = 'inspection-photos';
-
 const sb = {
   async rest(method, path, body, params = {}) {
     const url = new URL(`${SUPABASE_URL}/rest/v1/${path}`);
@@ -4914,32 +4972,6 @@ const sb = {
     return res.json();
   },
 
-  async uploadPhoto(reportId, dataUrl) {
-    const mime   = dataUrl.split(';')[0].split(':')[1];
-    const ext    = mime.split('/')[1];
-    const base64 = dataUrl.split(',')[1];
-    const bytes  = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-    const path   = `${reportId}/${Date.now()}.${ext}`;
-    const res = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/${PHOTO_BUCKET}/${path}`,
-      {
-        method:  'POST',
-        headers: {
-          'apikey':        SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type':  mime,
-          'x-upsert':      'true',
-        },
-        body: bytes,
-      }
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `Storage upload failed: HTTP ${res.status}`);
-    }
-    // Public URL — no expiry, no extra round-trip
-    return `${SUPABASE_URL}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
-  },
 };
 
 // ══════════════════════════════════════════════════════════════════════
@@ -5028,55 +5060,6 @@ function rowToReport(row) {
   };
 }
 
-async function uploadPendingPhotos(report) {
-  let changed = false;
-  const photos = (report.photos || []).slice();
-  for (let i = 0; i < photos.length; i++) {
-    const p = photos[i];
-    if (p && p.url && p.url.startsWith('data:')) {
-      try {
-        photos[i] = { ...p, url: await sb.uploadPhoto(report.id, p.url) };
-        changed = true;
-      } catch (e) { console.warn('[AQL] Photo upload failed:', e.message); }
-    }
-  }
-  if (changed) report.photos = photos;
-
-  const defects = { ...(report.defects || {}) };
-  for (const code of Object.keys(defects)) {
-    const d = { ...defects[code] };
-    const dp = (d.photos || []).slice();
-    let dChanged = false;
-    for (let i = 0; i < dp.length; i++) {
-      if (typeof dp[i] === 'string' && dp[i].startsWith('data:')) {
-        try {
-          dp[i] = await sb.uploadPhoto(report.id, dp[i]);
-          dChanged = true;
-        } catch (e) { console.warn('[AQL] Defect photo upload failed:', e.message); }
-      }
-    }
-    if (dChanged) { defects[code] = { ...d, photos: dp }; changed = true; }
-  }
-  if (changed) report.defects = defects;
-  return changed;
-}
-
-/** Same as uploadPendingPhotos but for interim reports (flat photos array, no defect photos). */
-async function uploadPendingPhotosInterim(ir) {
-  let changed = false;
-  const photos = (ir.photos || []).slice();
-  for (let i = 0; i < photos.length; i++) {
-    const p = photos[i];
-    if (p && p.url && p.url.startsWith('data:')) {
-      try {
-        photos[i] = { ...p, url: await sb.uploadPhoto(ir.id, p.url) };
-        changed = true;
-      } catch(e) { console.warn('[AQL] Interim photo upload failed:', e.message); }
-    }
-  }
-  if (changed) ir.photos = photos;
-  return changed;
-}
 function interimToRow(ir) {
   return {
     id:          ir.id,
@@ -5161,10 +5144,13 @@ async function loadInterimReportsFromSupabase() {
       const fromLocal    = loadInterimReports();
       const merged = [...fromSupabase];
       fromLocal.forEach(lr => { if (!merged.find(sr => sr.id === lr.id)) merged.push(lr); });
-      // Merge photos from IndexedDB (device-local)
+      // Rehydrate photos from IndexedDB (device-local)
       state.interimReports = await Promise.all(merged.map(ir => mergePhotosIntoInterim(ir)));
       // Save metadata only to localStorage
-      localStorage.setItem(INTERIM_KEY, JSON.stringify(merged));
+      const stripped = merged.map(ir => ({ ...ir, photos: [] }));
+      localStorage.setItem(INTERIM_KEY, JSON.stringify(stripped));
+      // Seed the dedup cache
+      for (const row of stripped) { _syncCache.interim[row.id] = _rowHash(interimToRow(row)); }
       return;
     }
   } catch(e) { console.warn('[AQL] Interim load failed:', e.message); }
@@ -5180,6 +5166,8 @@ async function loadChecklistsFromSupabase() {
       fromLocal.forEach(lr => { if (!merged.find(sr => sr.id === lr.id)) merged.push(lr); });
       state.checklists = merged;
       localStorage.setItem(CHECKLIST_KEY, JSON.stringify(merged));
+      // Seed the dedup cache
+      for (const cl of merged) { _syncCache.checklists[cl.id] = _rowHash(checklistToRow(cl)); }
       return;
     }
   } catch(e) { console.warn('[AQL] Checklists load failed:', e.message); }
@@ -5193,12 +5181,20 @@ async function loadReportsFromSupabase() {
       limit:  String(MAX_STORED === Infinity ? 9999 : MAX_STORED),
     });
     if (rows && rows.length) {
-      const reports = rows.map(rowToReport);
-      // Merge photos from IndexedDB (device-local)
-      state.reports = await Promise.all(reports.map(r => mergePhotosIntoReport(r)));
-      // Save metadata only to localStorage (no photos)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(reports));
-      showDashboard();
+      const fromSupabase = rows.map(rowToReport);
+      const fromLocal    = (() => {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch(_) { return []; }
+      })();
+      // Merge: Supabase is authoritative for shared metadata; local-only records are kept
+      const merged = [...fromSupabase];
+      fromLocal.forEach(lr => { if (!merged.find(sr => sr.id === lr.id)) merged.push(lr); });
+      // Rehydrate photos from IndexedDB (device-local — never synced to Supabase)
+      state.reports = await Promise.all(merged.map(r => mergePhotosIntoReport(r)));
+      // Save merged metadata to localStorage (no photos)
+      const stripped = merged.map(r => ({ ...r, photos: [], defects: stripDefectPhotos(r.defects || {}) }));
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped)); } catch(_) {}
+      // Seed the dedup cache so the next persistReports() skips all just-loaded rows
+      for (const row of stripped) { _syncCache.reports[row.id] = _rowHash(reportToRow(row)); }
       return;
     }
   } catch (e) {
