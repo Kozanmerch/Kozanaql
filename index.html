@@ -1047,9 +1047,22 @@ function updateReport(fn) {
 // ══════════════════════════════════════════════════════════════════════
 
 /** Saves reports to localStorage and syncs to Supabase. Oldest reports are
- * pruned when storage is full. Call after every report mutation. */
+ * pruned when storage is full. Call after every report mutation.
+ * Photos are uploaded to the storage bucket first — only URLs are stored
+ * in localStorage and the DB, never raw base64. */
 async function persistReports() {
-  // Sort by date ascending so oldest is first (index 0)
+  // ── Upload any pending base64 photos to bucket first ──────────────
+  // This replaces base64 data URIs with bucket URLs IN STATE before
+  // writing to localStorage, so localStorage never stores raw base64.
+  if (typeof sb !== 'undefined') {
+    for (const r of state.reports) {
+      try { await uploadPendingPhotos(r); } catch(e) {
+        console.warn('[AQL] Photo upload failed, keeping base64 for now:', e.message);
+      }
+    }
+  }
+
+  // ── Write to localStorage (photos are now URLs, not base64) ───────
   const sorted = [...state.reports].sort((a, b) => {
     const da = a.savedAt || a.date || '';
     const db = b.savedAt || b.date || '';
@@ -1075,11 +1088,10 @@ async function persistReports() {
     toast(t('⚠️ Storage critically full. Please export reports as PDF and clear storage.'), 8000);
   }
 
-  // ── Supabase sync ──────────────────────────────────────────────
+  // ── Sync to Supabase DB (photos already uploaded, rows contain only URLs) ──
   if (typeof sb !== 'undefined') {
     for (const r of state.reports) {
       try {
-        await uploadPendingPhotos(r);
         const row = reportToRow(r);
         await sb.rest('POST', 'reports', row, { on_conflict: 'id' });
         console.log('[AQL] ✅ Synced report:', r.id);
@@ -1107,9 +1119,21 @@ function loadInterimReports() {
   try { return JSON.parse(localStorage.getItem(INTERIM_KEY) || '[]'); } catch(_){ return []; }
 }
 /** Persists in-line reports to localStorage + Supabase. Fire-and-forget — callers
- * do not await this. Mirrors persistReports() pattern for in-line data. */
+ * do not await this. Photos are uploaded to bucket first so only URLs are stored. */
 async function saveInterimReports() {
+  // Upload any pending base64 photos to bucket first
+  if (typeof sb !== 'undefined') {
+    for (const ir of state.interimReports) {
+      try { await uploadPendingPhotosInterim(ir); } catch(e) {
+        console.warn('[AQL] Interim photo upload failed, keeping base64 for now:', e.message);
+      }
+    }
+  }
+
+  // Write URLs (not base64) to localStorage
   try { localStorage.setItem(INTERIM_KEY, JSON.stringify(state.interimReports)); } catch(_) {}
+
+  // Sync to Supabase DB
   if (typeof sb !== 'undefined') {
     for (const ir of state.interimReports) {
       try {
@@ -1698,22 +1722,32 @@ function editorSetupCropDrag() {
 }
 
 /**
- * Applies all edits at full resolution, compresses the result,
- * then calls camState.onSave() with the final data URL.
+ * Applies all edits at full resolution. Encodes based on photo label:
+ * - Barcode or Trim labels → lossless JPEG (quality 1.0), never compress
+ * - Everything else with edits → WebP 80% (~50% smaller, visually fine for garment shots)
+ * - No edits at all → original bytes returned untouched
  */
 async function editorSave() {
   if (!camState.srcImage) return;
 
   const noEdits = camState.rotation === 0 && !camState.flipH && !camState.flipV && !camState.cropActive;
 
-  // No edits — return the original untouched. Zero re-encoding for camera shots AND uploads.
+  // Helper: should this label be kept lossless?
+  function isProtectedLabel(label) {
+    if (!label) return false;
+    const l = label.toLowerCase();
+    return l.includes('barcode') || l.includes('barkod') || l.includes('trim') || l.includes('aksesuar');
+  }
+  const protected_ = isProtectedLabel(camState.label);
+
+  // No edits — return the original untouched regardless of label.
   if (noEdits && camState.originalDataURL) {
     document.getElementById('cam-editor').classList.remove('open');
     if (typeof camState.onSave === 'function') camState.onSave(camState.originalDataURL);
     return;
   }
 
-  // Edits applied — render at full native resolution, encode once at max quality
+  // Edits applied — render at full native resolution
   const img = camState.srcImage;
   const rot = ((camState.rotation % 360) + 360) % 360;
   const swapped = rot === 90 || rot === 270;
@@ -1751,7 +1785,13 @@ async function editorSave() {
   }
 
   document.getElementById('cam-editor').classList.remove('open');
-  if (typeof camState.onSave === 'function') camState.onSave(result.toDataURL('image/jpeg', 1.0));
+
+  // Encode: protected labels → lossless JPEG, everything else → WebP 80%
+  const finalUrl = protected_
+    ? result.toDataURL('image/jpeg', 1.0)
+    : result.toDataURL('image/webp', 0.80);
+
+  if (typeof camState.onSave === 'function') camState.onSave(finalUrl);
 }
 
 function editorDiscard() {
@@ -3021,8 +3061,8 @@ async function addInterimPhotos(input) {
   if (files.length === 1) {
     const reader = new FileReader();
     reader.onload = e => {
+      camState.label  = '';   // label assigned after save in interim grid
       camState.onSave = url => {
-        // editorSave already outputs at full quality — no second compression pass
         updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url, label: '' }); });
         _refreshInterimPhotoGrid();
         toast(t('📸 Photo saved'));
@@ -3060,6 +3100,7 @@ function deleteInterimPhoto(idx) {
 function editInterimPhoto(idx) {
   const ir = state.currentInterim;
   if (!ir || !ir.photos || !ir.photos[idx]) return;
+  camState.label  = ir.photos[idx].label || '';
   camState.onSave = url => {
     updateInterim(r => { r.photos[idx] = { ...r.photos[idx], url }; });
     _refreshInterimPhotoGrid();
@@ -4078,6 +4119,7 @@ function uploadPhoto(input) {
   if (files.length === 1) {
     const reader = new FileReader();
     reader.onload = e => {
+      camState.label  = state.photoLabel || '';
       camState.onSave = url => {
         addPhotoToReport(url, state.photoLabel);
         renderStep4(state.currentReport);
@@ -4121,6 +4163,7 @@ function deletePhoto(idx) {
 function editPhoto(idx) {
   const r = state.currentReport;
   if (!r || !r.photos[idx]) return;
+  camState.label  = r.photos[idx].label || '';
   camState.onSave = url => {
     updateReport(r2 => { r2.photos[idx] = { ...r2.photos[idx], url }; });
     renderStep4(state.currentReport);
@@ -4787,20 +4830,8 @@ const sb = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Storage upload failed: HTTP ${res.status}`);
     }
-    const signed = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/sign/${PHOTO_BUCKET}/${path}`,
-      {
-        method:  'POST',
-        headers: {
-          'apikey':        SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type':  'application/json',
-        },
-        body: JSON.stringify({ expiresIn: 3156000 }),
-      }
-    );
-    const { signedURL } = await signed.json();
-    return `${SUPABASE_URL}/storage/v1${signedURL}`;
+    // Public URL — no expiry, no extra round-trip
+    return `${SUPABASE_URL}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
   },
 };
 
@@ -4923,7 +4954,22 @@ async function uploadPendingPhotos(report) {
   return changed;
 }
 
-// ── Interim serialisation ─────────────────────────────────────────────
+/** Same as uploadPendingPhotos but for interim reports (flat photos array, no defect photos). */
+async function uploadPendingPhotosInterim(ir) {
+  let changed = false;
+  const photos = (ir.photos || []).slice();
+  for (let i = 0; i < photos.length; i++) {
+    const p = photos[i];
+    if (p && p.url && p.url.startsWith('data:')) {
+      try {
+        photos[i] = { ...p, url: await sb.uploadPhoto(ir.id, p.url) };
+        changed = true;
+      } catch(e) { console.warn('[AQL] Interim photo upload failed:', e.message); }
+    }
+  }
+  if (changed) ir.photos = photos;
+  return changed;
+}
 function interimToRow(ir) {
   return {
     id:          ir.id,
