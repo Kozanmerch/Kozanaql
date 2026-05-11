@@ -644,8 +644,8 @@ const CHECKLIST_PEOPLE_KEY = 'aql_checklist_people';
 const PEOPLE_DEFAULTS_KEY  = 'aql_people_defaults';
 const CUSTOMERS_KEY    = 'aql_customers';
 const MAX_STORED       = Infinity;
-const PHOTO_MAX_DIM    = 1920;
-const PHOTO_QUALITY    = 0.95;
+const PHOTO_MAX_DIM    = 1600;
+const PHOTO_QUALITY    = 0.82;
 const PRINT_DELAY_MS   = 300;
 const TOAST_DURATION   = 2000;
 
@@ -1488,7 +1488,7 @@ function camSnap() {
   const h = settings.height || video.videoHeight || 720;
   canvas.width = w; canvas.height = h;
   canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-  const url = canvas.toDataURL('image/jpeg', 1.0);  // lossless capture before any edit
+  const url = canvas.toDataURL('image/jpeg', 0.92);  // slightly above save quality to preserve headroom through editor
   camClose();
   editorOpen(url);
 }
