@@ -645,7 +645,7 @@ const PEOPLE_DEFAULTS_KEY  = 'aql_people_defaults';
 const CUSTOMERS_KEY    = 'aql_customers';
 const MAX_STORED       = Infinity;
 const PHOTO_MAX_DIM    = 1920;
-const PHOTO_QUALITY    = 0.88;
+const PHOTO_QUALITY    = 0.95;
 const PRINT_DELAY_MS   = 300;
 const TOAST_DURATION   = 2000;
 
@@ -1700,9 +1700,12 @@ async function editorSave() {
 
   document.getElementById('cam-editor').classList.remove('open');
 
-  const compressed = await compressImage(result.toDataURL('image/jpeg', 0.95));
+  // Output at full resolution with high quality — no second compression pass.
+  // compressImage() is only needed for raw uploads that may be very large.
+  // Re-encoding a JPEG a second time (lossy→lossy) degrades quality noticeably.
+  const finalUrl = result.toDataURL('image/jpeg', PHOTO_QUALITY);
   if (typeof camState.onSave === 'function') {
-    camState.onSave(compressed);
+    camState.onSave(finalUrl);
   }
 }
 
