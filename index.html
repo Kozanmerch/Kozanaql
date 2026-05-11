@@ -3277,8 +3277,8 @@ ${interimPhotoPages}
 //     for fonts/images to load before capturing.
 // ══════════════════════════════════════════════════════════════════════
 // ── SHARED PDF DOWNLOAD ENGINE ───────────────────────────────────────
-// Renders HTML into a hidden iframe, captures each .pdf-page div
-// as a separate jsPDF page — guarantees no content ever splits.
+// Renders HTML into a hidden iframe. Text/layout pages use html2canvas.
+// Photo pages inject images directly into jsPDF at full quality — no screenshot degradation.
 function _triggerPDFDownload(htmlContent, filename, margin) {
   margin = margin || 5;
   toast('⏳ PDF hazırlanıyor…', 8000);
@@ -3287,73 +3287,128 @@ function _triggerPDFDownload(htmlContent, filename, margin) {
   if (old) old.remove();
   const iframe = document.createElement('iframe');
   iframe.id = '_pdf_dl_iframe';
-  // Wide enough for A4, tall enough to render all pages without scrolling
   iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;height:5000px;border:none;visibility:hidden;';
   document.body.appendChild(iframe);
 
   iframe.onload = function() {
-    setTimeout(function() {
+    setTimeout(async function() {
       const iDoc = iframe.contentDocument || iframe.contentWindow.document;
       const pages = iDoc.querySelectorAll('.pdf-page');
-
-      if (!pages || pages.length === 0) {
-        // Fallback: capture entire body as single page
-        html2canvas(iDoc.body, { scale:2, useCORS:true, logging:false, backgroundColor:'#ffffff', width:794, windowWidth:794 }).then(function(canvas) {
-          const { jsPDF } = window.jspdf;
-          const pdf = new jsPDF({ unit:'mm', format:'a4', orientation:'portrait' });
-          const pageW = pdf.internal.pageSize.getWidth();
-          const contentW = pageW - margin * 2;
-          const imgH = (canvas.height / 2) * (contentW / (canvas.width / 2));
-          pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, contentW, imgH);
-          const url = URL.createObjectURL(pdf.output('blob'));
-          const a = document.createElement('a'); a.href = url; a.download = filename;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 5000);
-          toast('✓ ' + filename + ' indirildi');
-          iframe.remove();
-        });
-        return;
-      }
-
-      // Capture each .pdf-page as a separate PDF page
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF({ unit:'mm', format:'a4', orientation:'portrait' });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
+      const pageW   = pdf.internal.pageSize.getWidth();
+      const pageH   = pdf.internal.pageSize.getHeight();
       const contentW = pageW - margin * 2;
       const contentH = pageH - margin * 2;
 
-      const captureNext = (idx) => {
-        if (idx >= pages.length) {
-          const url = URL.createObjectURL(pdf.output('blob'));
-          const a = document.createElement('a'); a.href = url; a.download = filename;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 5000);
-          toast('✓ ' + filename + ' indirildi');
-          iframe.remove();
-          return;
+      // A page is a "photo page" if it contains large data-URI images (not logos)
+      function isPhotoPage(pg) {
+        return Array.from(pg.querySelectorAll('img')).some(
+          img => img.src && img.src.length > 5000 && img.naturalWidth > 200
+        );
+      }
+
+      // Inject photos directly into jsPDF — bypasses html2canvas entirely
+      async function renderPhotoPageDirect(pg, isFirst) {
+        if (!isFirst) pdf.addPage();
+
+        // Render any section-bar header text via html2canvas (tiny, no quality loss)
+        const bar = pg.querySelector('.section-bar');
+        const barH = bar ? 7 : 0;
+        if (bar) {
+          const bc = await html2canvas(bar, { scale:2, useCORS:true, logging:false, backgroundColor:'#A6A6A6', width:794, windowWidth:794 });
+          pdf.addImage(bc.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, contentW, barH);
         }
-        const pg = pages[idx];
-        html2canvas(pg, { scale:2, useCORS:true, logging:false, backgroundColor:'#ffffff', width:794, windowWidth:794 }).then(function(canvas) {
-          if (idx > 0) pdf.addPage();
-          const imgH = (canvas.height / 2) * (contentW / (canvas.width / 2));
-          // If the page content is taller than one A4, scale it to fit
-          const drawH = Math.min(imgH, contentH);
-          pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, contentW, drawH);
-          captureNext(idx + 1);
-        }).catch(function(err) {
-          console.error('PDF page error:', err);
-          captureNext(idx + 1); // skip broken page
+
+        const photos = Array.from(pg.querySelectorAll('img')).filter(
+          img => img.src && img.src.length > 5000 && img.naturalWidth > 200
+        );
+
+        const cols   = 2;
+        const gap    = 3;
+        const cellW  = (contentW - gap) / cols;
+        const cellH  = 86;
+        const startY = margin + barH + (bar ? 2 : 0);
+
+        photos.forEach((img, i) => {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          const x   = margin + col * (cellW + gap);
+          const y   = startY + row * (cellH + gap);
+
+          // Cell border
+          pdf.setDrawColor(200, 200, 200);
+          pdf.setLineWidth(0.2);
+          pdf.rect(x, y, cellW, cellH);
+
+          // Fit image preserving aspect ratio
+          const iw = img.naturalWidth  || 1;
+          const ih = img.naturalHeight || 1;
+          const photoH = cellH - 7; // reserve bottom for label
+          const scale  = Math.min(cellW / iw, photoH / ih);
+          const dw = iw * scale;
+          const dh = ih * scale;
+          const dx = x + (cellW - dw) / 2;
+          const dy = y + (photoH - dh) / 2;
+
+          try {
+            const fmt = img.src.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+            pdf.addImage(img.src, fmt, dx, dy, dw, dh);
+          } catch(e) { console.warn('[AQL] Photo embed failed:', e); }
+
+          // Label text at bottom of cell
+          const labelEl = pg.querySelectorAll('div[style*="background:#f0f0f0"], div[style*="background:#F0F0F0"]')[i];
+          const label   = labelEl ? labelEl.textContent.trim() : '';
+          if (label) {
+            pdf.setFontSize(6.5);
+            pdf.setTextColor(80, 80, 80);
+            pdf.text(label, x + cellW / 2, y + cellH - 1.5, { align:'center', maxWidth: cellW - 2 });
+          }
         });
-      };
-      captureNext(0);
-    }, 1000); // wait for fonts and images
+      }
+
+      if (!pages || pages.length === 0) {
+        const canvas = await html2canvas(iDoc.body, { scale:2, useCORS:true, logging:false, backgroundColor:'#ffffff', width:794, windowWidth:794 });
+        const imgH = (canvas.height / 2) * (contentW / (canvas.width / 2));
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, contentW, Math.min(imgH, contentH));
+        _finishPDF(pdf, filename, iframe);
+        return;
+      }
+
+      let isFirst = true;
+      for (let idx = 0; idx < pages.length; idx++) {
+        const pg = pages[idx];
+        try {
+          if (isPhotoPage(pg)) {
+            await renderPhotoPageDirect(pg, isFirst);
+          } else {
+            const canvas = await html2canvas(pg, { scale:2, useCORS:true, logging:false, backgroundColor:'#ffffff', width:794, windowWidth:794 });
+            if (!isFirst) pdf.addPage();
+            const imgH = (canvas.height / 2) * (contentW / (canvas.width / 2));
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, contentW, Math.min(imgH, contentH));
+          }
+        } catch(err) { console.error('PDF page error:', err); }
+        isFirst = false;
+      }
+      _finishPDF(pdf, filename, iframe);
+
+    }, 1000);
     setTimeout(function() { if (iframe.parentNode) iframe.remove(); }, 30000);
   };
 
   iframe.contentDocument.open();
   iframe.contentDocument.write(htmlContent);
   iframe.contentDocument.close();
+}
+
+function _finishPDF(pdf, filename, iframe) {
+  const url = URL.createObjectURL(pdf.output('blob'));
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast('✓ ' + filename + ' indirildi');
+  if (iframe && iframe.parentNode) iframe.remove();
 }
 
 function downloadInterimPDF() {
