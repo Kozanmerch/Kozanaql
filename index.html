@@ -3301,11 +3301,15 @@ function _triggerPDFDownload(htmlContent, filename, margin) {
       const contentW = pageW - margin * 2;
       const contentH = pageH - margin * 2;
 
-      // A page is a "photo page" if it contains large data-URI images (not logos)
+      // A page is a "photo page" if it contains the photo section bar or multiple large images
       function isPhotoPage(pg) {
-        return Array.from(pg.querySelectorAll('img')).some(
+        const bar = pg.querySelector('.section-bar');
+        if (bar && (bar.textContent.includes('PHOTO') || bar.textContent.includes('FOTOĞRAF'))) return true;
+        // Also detect by counting large data-URI images (more than 1 means it's a photo grid, not just a logo)
+        const largeImgs = Array.from(pg.querySelectorAll('img')).filter(
           img => img.src && img.src.length > 5000 && img.naturalWidth > 200
         );
+        return largeImgs.length > 1;
       }
 
       // Inject photos directly into jsPDF — bypasses html2canvas entirely
@@ -3356,8 +3360,9 @@ function _triggerPDFDownload(htmlContent, filename, margin) {
             pdf.addImage(img.src, fmt, dx, dy, dw, dh);
           } catch(e) { console.warn('[AQL] Photo embed failed:', e); }
 
-          // Label text at bottom of cell
-          const labelEl = pg.querySelectorAll('div[style*="background:#f0f0f0"], div[style*="background:#F0F0F0"]')[i];
+          // Label text at bottom of cell — find it within the same grid cell as the image
+          const cellContainer = img.closest('div[style*="flex-direction:column"], div[style*="flex-direction: column"]');
+          const labelEl = cellContainer && cellContainer.querySelector('div[style*="background:#f0f0f0"], div[style*="background:#F0F0F0"]');
           const label   = labelEl ? labelEl.textContent.trim() : '';
           if (label) {
             pdf.setFontSize(6.5);
