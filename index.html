@@ -221,31 +221,74 @@ body {
 .status-counts .sc.ov strong { color: var(--fail); }
 .status-counts .sc.warn strong { color: var(--warn); }
 
-.photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
 .photo-thumb {
-  aspect-ratio: 1; border-radius: var(--r-sm); overflow: hidden;
-  position: relative; background: var(--surface); border: 1px solid var(--border);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  background: #f9f9f9;
+  display: flex;
+  flex-direction: column;
   cursor: pointer;
 }
-.photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.photo-thumb .pt-label {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  background: rgba(0,0,0,0.7); padding: 4px 6px;
-  font-size: 10px; color: #fff; text-align: center;
+/* Image cell — matches PDF: fixed height, object-fit contain, white/light bg */
+.photo-thumb .pt-img-wrap {
+  width: 100%;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f9f9f9;
+  overflow: hidden;
 }
+.photo-thumb img {
+  max-width: 100%; max-height: 200px;
+  width: auto; height: auto;
+  display: block;
+  object-fit: contain;
+}
+/* Label bar — matches PDF exactly */
+.photo-thumb .pt-label {
+  border-top: 1px solid #ddd;
+  background: #f0f0f0;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  text-align: center;
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.photo-thumb .pt-label input {
+  background: transparent; border: none;
+  color: #374151; font-size: 11px; font-weight: 700;
+  width: 100%; text-align: center; outline: none; cursor: text;
+  font-family: inherit;
+}
+/* Action buttons — float over image */
 .photo-thumb .pt-del {
-  position: absolute; top: 4px; right: 4px;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: rgba(0,0,0,0.7); border: none; color: #fff;
-  cursor: pointer; font-size: 13px; display: flex;
+  position: absolute; top: 6px; right: 6px;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(220,38,38,0.85); border: none; color: #fff;
+  cursor: pointer; font-size: 14px; display: flex;
   align-items: center; justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
 }
 .photo-thumb .pt-edit {
-  position: absolute; top: 4px; left: 4px;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: rgba(0,0,0,0.7); border: none; color: #fff;
-  cursor: pointer; font-size: 12px; display: flex;
+  position: absolute; top: 6px; left: 6px;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(0,0,0,0.55); border: none; color: #fff;
+  cursor: pointer; font-size: 14px; display: flex;
   align-items: center; justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
 }
 /* ── Camera modal — fullscreen ── */
 .cam-modal {
@@ -264,35 +307,40 @@ body {
 /* ── Editor mode (crop/rotate) ── */
 .cam-editor {
   display:none; position:fixed; inset:0; z-index:2001;
-  background:#111; flex-direction:column; align-items:center;
+  background:#0a0a0a; flex-direction:column; align-items:center;
 }
 .cam-editor.open { display:flex; }
 .cam-editor-img {
   flex:1; width:100%; display:flex; align-items:center; justify-content:center;
-  overflow:hidden; position:relative;
+  overflow:hidden; position:relative; background:#0a0a0a;
 }
 .cam-editor-topbar {
-  width:100%; background:rgba(0,0,0,0.85); padding:10px 16px;
+  width:100%; background:#000; padding:10px 16px;
   display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+  border-bottom:1px solid rgba(255,255,255,0.1);
 }
 .cam-editor-img canvas {
   max-width:100%; max-height:100%;
   display:block; touch-action:none; cursor:crosshair;
 }
 .cam-toolbar {
-  width:100%; background:#1a1a1a; padding:10px 16px;
-  display:flex; align-items:center; justify-content:center; gap:10px;
-  flex-wrap:wrap;
+  width:100%; background:#111; padding:12px 10px;
+  display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+  flex-shrink:0; border-top:1px solid rgba(255,255,255,0.08);
 }
 .cam-btn {
-  padding:8px 16px; border-radius:var(--r-sm); border:1.5px solid rgba(255,255,255,0.2);
-  background:rgba(255,255,255,0.08); color:#fff; font-family:inherit;
-  font-size:14px; cursor:pointer; display:flex; align-items:center; gap:6px;
-  white-space:nowrap;
+  padding:11px 8px; border-radius:var(--r-sm); border:1.5px solid rgba(255,255,255,0.15);
+  background:rgba(255,255,255,0.07); color:#fff; font-family:inherit;
+  font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px;
+  white-space:nowrap; transition:background 0.12s, border-color 0.12s;
+  -webkit-tap-highlight-color:transparent;
 }
-.cam-btn:active { background:rgba(255,255,255,0.18); }
+.cam-btn:active { background:rgba(255,255,255,0.2); border-color:rgba(255,255,255,0.35); }
+.cam-btn.active-tool { background:rgba(58,111,212,0.35); border-color:var(--accent2); color:#fff; }
 .cam-btn.primary { background:var(--accent2); border-color:var(--accent2); }
+.cam-btn.primary:active { background:#2d5ab8; }
 .cam-btn.danger  { background:#dc2626; border-color:#dc2626; }
+.cam-btn.danger:active  { background:#b91c1c; }
 .cam-shutter {
   width:72px; height:72px; border-radius:50%;
   background:#fff; border:5px solid rgba(255,255,255,0.4);
@@ -313,14 +361,32 @@ body {
 }
 /* Crop rectangle overlay */
 .crop-overlay {
-  position:absolute; border:2px solid #fff;
-  box-shadow:0 0 0 9999px rgba(0,0,0,0.5);
+  position:absolute; border:2px solid rgba(255,255,255,0.9);
   cursor:move; touch-action:none;
+  /* rule-of-thirds grid */
+  background:
+    linear-gradient(rgba(255,255,255,0.15) 1px, transparent 1px) 0 0 / 100% 33.33%,
+    linear-gradient(90deg, rgba(255,255,255,0.15) 1px, transparent 1px) 0 0 / 33.33% 100%;
+  /* dim outside the crop */
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
 }
 .crop-handle {
-  position:absolute; width:14px; height:14px;
-  background:#fff; border:2px solid #333; border-radius:2px;
+  position:absolute; width:22px; height:22px;
+  background:transparent;
 }
+/* L-shaped corner brackets via pseudo-elements */
+.crop-handle::before,
+.crop-handle::after {
+  content:''; position:absolute; background:#fff; border-radius:1px;
+}
+.crop-handle[data-handle="tl"]::before { top:0; left:0; width:14px; height:3px; }
+.crop-handle[data-handle="tl"]::after  { top:0; left:0; width:3px;  height:14px; }
+.crop-handle[data-handle="tr"]::before { top:0; right:0; width:14px; height:3px; }
+.crop-handle[data-handle="tr"]::after  { top:0; right:0; width:3px;  height:14px; }
+.crop-handle[data-handle="bl"]::before { bottom:0; left:0; width:14px; height:3px; }
+.crop-handle[data-handle="bl"]::after  { bottom:0; left:0; width:3px;  height:14px; }
+.crop-handle[data-handle="br"]::before { bottom:0; right:0; width:14px; height:3px; }
+.crop-handle[data-handle="br"]::after  { bottom:0; right:0; width:3px;  height:14px; }
 /* Old inline camera — keep for fallback */
 .camera-preview {
   width: 100%; aspect-ratio: 4/3; background: #000;
@@ -541,10 +607,10 @@ body {
   <div class="cam-editor-img" id="cam-editor-img">
     <canvas id="editor-canvas"></canvas>
     <div class="crop-overlay" id="crop-overlay" style="display:none">
-      <div class="crop-handle" style="top:-7px;left:-7px;cursor:nw-resize" data-handle="tl"></div>
-      <div class="crop-handle" style="top:-7px;right:-7px;cursor:ne-resize" data-handle="tr"></div>
-      <div class="crop-handle" style="bottom:-7px;left:-7px;cursor:sw-resize" data-handle="bl"></div>
-      <div class="crop-handle" style="bottom:-7px;right:-7px;cursor:se-resize" data-handle="br"></div>
+      <div class="crop-handle" style="top:-11px;left:-11px;cursor:nw-resize" data-handle="tl"></div>
+      <div class="crop-handle" style="top:-11px;right:-11px;cursor:ne-resize" data-handle="tr"></div>
+      <div class="crop-handle" style="bottom:-11px;left:-11px;cursor:sw-resize" data-handle="bl"></div>
+      <div class="crop-handle" style="bottom:-11px;right:-11px;cursor:se-resize" data-handle="br"></div>
     </div>
   </div>
   <div class="cam-toolbar">
@@ -1613,13 +1679,18 @@ async function camOpen(onSave, labelText) {
 async function camStartStream() {
   if (camState.stream) { camState.stream.getTracks().forEach(t => t.stop()); camState.stream = null; }
   try {
+    // Request preview resolution matching screen pixel density — not 4K.
+    // Browser downscaling a 4K feed to a 390px screen = blurry preview.
+    // ImageCapture.takePhoto() still captures full sensor res at shutter time.
+    const dpr = window.devicePixelRatio || 1;
+    const previewW = Math.round(window.screen.width  * dpr);
+    const previewH = Math.round(window.screen.height * dpr);
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: camState.facingMode,
-        width:  { ideal: 4096 },
-        height: { ideal: 3072 },
-        frameRate: { ideal: 30 },
-        resizeMode: 'none',         // don't let browser downscale
+        width:  { ideal: previewW },
+        height: { ideal: previewH },
+        frameRate: { ideal: 30, min: 15 },
       },
       audio: false
     });
@@ -1799,17 +1870,17 @@ function editorReset() {
   camState.rotation = 0; camState.flipH = false; camState.flipV = false;
   camState.cropActive = false; camState.cropRect = null;
   const btn = document.getElementById('crop-toggle-btn');
-  if (btn) btn.style.background = '';
+  if (btn) { btn.style.background = ''; btn.classList.remove('active-tool'); }
   editorDraw();
 }
 
 function editorToggleCrop() {
   camState.cropActive = !camState.cropActive;
   const btn = document.getElementById('crop-toggle-btn');
-  if (btn) btn.style.background = camState.cropActive ? 'var(--accent2)' : '';
+  if (btn) btn.classList.toggle('active-tool', camState.cropActive);
   if (camState.cropActive && !camState.cropRect) {
     const canvas = document.getElementById('editor-canvas');
-    const p = 20;
+    const p = 24;
     camState.cropRect = { x: p, y: p, w: canvas.width - p*2, h: canvas.height - p*2 };
   }
   if (!camState.cropActive) camState.cropRect = null;
@@ -3178,11 +3249,12 @@ function renderInterimForm() {
       </div>
       <div class="photo-grid" id="interim-photo-grid">
         ${(ir.photos||[]).map((p,i)=>`
-          <div class="photo-thumb" style="position:relative">
-            <img src="${p.url||p}" onerror="this.style.display='none'">
+          <div class="photo-thumb">
+            <div class="pt-img-wrap"><img src="${p.url||p}" onerror="this.style.display='none'"></div>
             <button class="pt-edit" onclick="editInterimPhoto(${i})" title="Edit">✏</button>
-            <input value="${esc((p.label||''))}" placeholder="" oninput="updateInterimPhotoLabel(${i},this.value)"
-              style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.55);color:#fff;border:none;font-size:10px;padding:2px 4px;text-align:center;outline:none;width:100%;box-sizing:border-box">
+            <div class="pt-label">
+              <input value="${esc((p.label||''))}" placeholder="Label…" oninput="updateInterimPhotoLabel(${i},this.value)">
+            </div>
             <button class="pt-del" onclick="deleteInterimPhoto(${i})">✕</button>
           </div>`).join('')}
         <label style="aspect-ratio:1;border-radius:var(--r-sm);border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;color:var(--muted);font-size:12px">
@@ -3282,11 +3354,12 @@ function _refreshInterimPhotoGrid() {
   const grid = qs('#interim-photo-grid');
   if (!grid || !ir) return;
   grid.innerHTML = (ir.photos||[]).map((p,i)=>`
-    <div class="photo-thumb" style="position:relative">
-      <img src="${p.url||p}" onerror="this.style.display='none'">
+    <div class="photo-thumb">
+      <div class="pt-img-wrap"><img src="${p.url||p}" onerror="this.style.display='none'"></div>
       <button class="pt-edit" onclick="editInterimPhoto(${i})" title="Edit">✏</button>
-      <input value="${esc((p.label||''))}" placeholder="" oninput="updateInterimPhotoLabel(${i},this.value)"
-        style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.55);color:#fff;border:none;font-size:10px;padding:2px 4px;text-align:center;outline:none;width:100%;box-sizing:border-box">
+      <div class="pt-label">
+        <input value="${esc((p.label||''))}" placeholder="Label…" oninput="updateInterimPhotoLabel(${i},this.value)">
+      </div>
       <button class="pt-del" onclick="deleteInterimPhoto(${i})">✕</button>
     </div>`).join('') +
   `<label style="aspect-ratio:1;border-radius:var(--r-sm);border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;color:var(--muted);font-size:12px">
@@ -4229,10 +4302,10 @@ function camOpenFinalPhoto() {
 function renderStep4(r) {
   const photosHTML = (r.photos||[]).map((p,i) => `
     <div class="photo-thumb">
-      <img src="${p.url}" alt="${p.label}">
+      <div class="pt-img-wrap"><img src="${p.url}" alt="${p.label}"></div>
       <button class="pt-edit" onclick="editPhoto(${i})" title="Edit">✏</button>
       <div class="pt-label">
-        <input value="${esc(p.label||'')}" style="background:transparent;border:none;color:#fff;font-size:10px;width:100%;text-align:center;outline:none;cursor:text"
+        <input value="${esc(p.label||'')}" placeholder="Label…"
           oninput="renamePhoto(${i},this.value)" onclick="event.stopPropagation()">
       </div>
       <button class="pt-del" onclick="deletePhoto(${i})">✕</button>
@@ -4348,10 +4421,10 @@ function renderPhotoGrid() {
   const r = state.currentReport;
   grid.innerHTML = (r.photos||[]).map((p,i) => `
     <div class="photo-thumb">
-      <img src="${p.url}" alt="${p.label}">
+      <div class="pt-img-wrap"><img src="${p.url}" alt="${p.label}"></div>
       <button class="pt-edit" onclick="editPhoto(${i})" title="Edit">✏</button>
       <div class="pt-label">
-        <input value="${esc(p.label||'')}" style="background:transparent;border:none;color:#fff;font-size:10px;width:100%;text-align:center;outline:none;cursor:text"
+        <input value="${esc(p.label||'')}" placeholder="Label…"
           oninput="renamePhoto(${i},this.value)" onclick="event.stopPropagation()">
       </div>
       <button class="pt-del" onclick="deletePhoto(${i})">✕</button>
