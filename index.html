@@ -518,11 +518,15 @@ body {
   <video id="cam-video" autoplay playsinline muted></video>
   <canvas id="cam-snap" style="display:none"></canvas>
   <div class="cam-bottom-bar">
-    <label class="cam-btn" style="cursor:pointer" title="Upload">
+    <label class="cam-btn" style="cursor:pointer" title="Upload from gallery">
       📁
       <input type="file" accept="image/*" multiple style="display:none" onchange="camUpload(this)">
     </label>
-    <button class="cam-shutter" onclick="camSnap()" aria-label="Take photo"></button>
+    <!-- Native camera: hands off to the device camera app for full sensor quality -->
+    <label style="display:flex;align-items:center;justify-content:center;cursor:pointer">
+      <div class="cam-shutter" title="Take photo"></div>
+      <input type="file" accept="image/*" capture="environment" style="display:none" onchange="camNativeSnap(this)">
+    </label>
     <div style="width:60px"></div>
   </div>
 </div>
@@ -1499,6 +1503,17 @@ async function camSnap() {
   const url = canvas.toDataURL('image/jpeg', 1.0);
   camClose();
   editorOpen(url);
+}
+
+async function camNativeSnap(input) {
+  const file = input.files[0];
+  if (!file) return;
+  camClose();
+  const reader = new FileReader();
+  reader.onload = e => editorOpen(e.target.result);
+  reader.readAsDataURL(file);
+  // Reset input so same file can be re-selected
+  input.value = '';
 }
 
 async function camUpload(input) {
