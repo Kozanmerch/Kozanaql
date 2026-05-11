@@ -3017,13 +3017,12 @@ async function addInterimPhotos(input) {
     reader.readAsDataURL(files[0]);
     return;
   }
-  // Multiple files → compress and add directly
+  // Multiple files → add directly, no processing
   for (const file of files) {
     const reader = new FileReader();
     await new Promise(resolve => {
-      reader.onload = async e => {
-        const compressed = await compressImage(e.target.result);
-        updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url: compressed, label: '' }); });
+      reader.onload = e => {
+        updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url: e.target.result, label: '' }); });
         resolve();
       };
       reader.readAsDataURL(file);
@@ -3889,12 +3888,11 @@ function saveDefectPhoto(code, input) {
   let pending  = files.length;
   files.forEach(file => {
     const reader = new FileReader();
-    reader.onload = async e => {
-      const compressed = await compressImage(e.target.result);
+    reader.onload = e => {
       updateReport(r => {
         if (!r.defects[code]) r.defects[code] = {maj:0,min:0};
         normDefectPhotos(r.defects[code]);
-        r.defects[code].photos.push(compressed);
+        r.defects[code].photos.push(e.target.result);
       });
       if (--pending === 0) renderStep3(state.currentReport);
     };
@@ -4015,12 +4013,11 @@ function uploadPhoto(input) {
     reader.readAsDataURL(files[0]);
     return;
   }
-  // Multiple → add directly
+  // Multiple → add directly, no processing
   files.forEach(file => {
     const reader = new FileReader();
-    reader.onload = async e => {
-      const compressed = await compressImage(e.target.result);
-      addPhotoToReport(compressed, state.photoLabel);
+    reader.onload = e => {
+      addPhotoToReport(e.target.result, state.photoLabel);
       renderStep4(state.currentReport);
     };
     reader.onerror = () => toast(t('⚠️ Could not read photo'));
