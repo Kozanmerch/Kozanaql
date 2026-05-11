@@ -1038,6 +1038,90 @@ function updateReport(fn) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// INDEXEDDB — Photo storage (device-local, large capacity)
+// Metadata (text) goes to localStorage + Supabase (synced across devices).
+// Photos go to IndexedDB (local only, survives sessions, editable anytime).
+// ══════════════════════════════════════════════════════════════════════
+
+const IDB_NAME    = 'aql_photos';
+const IDB_VERSION = 1;
+const IDB_STORE   = 'photos'; // key: reportId, value: { photos:[], defects:{} }
+
+let _idb = null;
+
+function idbOpen() {
+  if (_idb) return Promise.resolve(_idb);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = e => {
+      e.target.result.createObjectStore(IDB_STORE, { keyPath: 'id' });
+    };
+    req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function idbSavePhotos(id, photos, defects) {
+  try {
+    const db  = await idbOpen();
+    const tx  = db.transaction(IDB_STORE, 'readwrite');
+    const store = tx.objectStore(IDB_STORE);
+    // Strip defect photos into a flat map: { code: [url, url] }
+    const defectPhotos = {};
+    for (const [code, d] of Object.entries(defects || {})) {
+      const dp = d.photos || (d.photo ? [d.photo] : []);
+      if (dp.length) defectPhotos[code] = dp;
+    }
+    store.put({ id, photos: photos || [], defectPhotos });
+    return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  } catch(e) { console.warn('[AQL] IndexedDB save failed:', e); }
+}
+
+async function idbLoadPhotos(id) {
+  try {
+    const db  = await idbOpen();
+    const tx  = db.transaction(IDB_STORE, 'readonly');
+    const store = tx.objectStore(IDB_STORE);
+    return new Promise((resolve) => {
+      const req = store.get(id);
+      req.onsuccess = e => resolve(e.target.result || null);
+      req.onerror   = () => resolve(null);
+    });
+  } catch(e) { console.warn('[AQL] IndexedDB load failed:', e); return null; }
+}
+
+async function idbDeletePhotos(id) {
+  try {
+    const db  = await idbOpen();
+    const tx  = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(id);
+  } catch(e) {}
+}
+
+/** Merges IndexedDB photos back into a report object in memory. */
+async function mergePhotosIntoReport(r) {
+  const saved = await idbLoadPhotos(r.id);
+  if (!saved) return r;
+  // Merge report photos
+  if (saved.photos && saved.photos.length) r.photos = saved.photos;
+  // Merge defect photos back
+  if (saved.defectPhotos) {
+    for (const [code, urls] of Object.entries(saved.defectPhotos)) {
+      if (r.defects[code]) r.defects[code].photos = urls;
+    }
+  }
+  return r;
+}
+
+/** Merges IndexedDB photos back into an interim report. */
+async function mergePhotosIntoInterim(ir) {
+  const saved = await idbLoadPhotos(ir.id);
+  if (!saved) return ir;
+  if (saved.photos && saved.photos.length) ir.photos = saved.photos;
+  return ir;
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // STORAGE
 // ══════════════════════════════════════════════════════════════════════
 
@@ -1046,24 +1130,32 @@ function updateReport(fn) {
 // People/Customers are persisted immediately on change (see PEOPLE section)
 // ══════════════════════════════════════════════════════════════════════
 
-/** Saves reports to localStorage and syncs to Supabase. Oldest reports are
- * pruned when storage is full. Call after every report mutation.
- * Photos are uploaded to the storage bucket first — only URLs are stored
- * in localStorage and the DB, never raw base64. */
+/** Returns a copy of defects with all photo arrays cleared — for persistence only. */
+function stripDefectPhotos(defects) {
+  const out = {};
+  for (const [code, d] of Object.entries(defects)) {
+    out[code] = { ...d, photos: [], photo: undefined };
+  }
+  return out;
+}
+
+/** Saves reports — metadata to localStorage + Supabase, photos to IndexedDB. */
 async function persistReports() {
-  // ── Upload any pending base64 photos to bucket first ──────────────
-  // This replaces base64 data URIs with bucket URLs IN STATE before
-  // writing to localStorage, so localStorage never stores raw base64.
-  if (typeof sb !== 'undefined') {
-    for (const r of state.reports) {
-      try { await uploadPendingPhotos(r); } catch(e) {
-        console.warn('[AQL] Photo upload failed, keeping base64 for now:', e.message);
-      }
+  // Save photos to IndexedDB (device-local, large capacity)
+  for (const r of state.reports) {
+    if ((r.photos && r.photos.length) || Object.values(r.defects || {}).some(d => (d.photos||[]).length)) {
+      await idbSavePhotos(r.id, r.photos || [], r.defects || {});
     }
   }
 
-  // ── Write to localStorage (photos are now URLs, not base64) ───────
-  const sorted = [...state.reports].sort((a, b) => {
+  // Strip photos before writing metadata anywhere
+  const stripped = state.reports.map(r => ({
+    ...r,
+    photos: [],
+    defects: stripDefectPhotos(r.defects || {}),
+  }));
+
+  const sorted = [...stripped].sort((a, b) => {
     const da = a.savedAt || a.date || '';
     const db = b.savedAt || b.date || '';
     return da < db ? -1 : da > db ? 1 : 0;
@@ -1075,7 +1167,7 @@ async function persistReports() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
       if (attempts > 0) {
-        state.reports = sorted;
+        state.reports = state.reports.slice(attempts);
         toast(`⚠️ ${t('Storage full — oldest reports removed to make space. Download PDFs to keep them.')}`, 6000);
       }
       break;
@@ -1088,7 +1180,7 @@ async function persistReports() {
     toast(t('⚠️ Storage critically full. Please export reports as PDF and clear storage.'), 8000);
   }
 
-  // ── Sync to Supabase DB (photos already uploaded, rows contain only URLs) ──
+  // Sync metadata to Supabase (no photos in row)
   if (typeof sb !== 'undefined') {
     for (const r of state.reports) {
       try {
@@ -1103,10 +1195,14 @@ async function persistReports() {
 }
 
 
-(function loadReports() {
+(async function loadReports() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) state.reports = JSON.parse(raw);
+    if (raw) {
+      const reports = JSON.parse(raw);
+      // Merge photos back from IndexedDB
+      state.reports = await Promise.all(reports.map(r => mergePhotosIntoReport(r)));
+    }
   } catch (e) {
     toast(t('⚠️ Could not load saved reports'));
   }
@@ -1118,22 +1214,24 @@ async function persistReports() {
 function loadInterimReports() {
   try { return JSON.parse(localStorage.getItem(INTERIM_KEY) || '[]'); } catch(_){ return []; }
 }
-/** Persists in-line reports to localStorage + Supabase. Fire-and-forget — callers
- * do not await this. Photos are uploaded to bucket first so only URLs are stored. */
+
+async function loadInterimReportsWithPhotos() {
+  const reports = loadInterimReports();
+  return Promise.all(reports.map(ir => mergePhotosIntoInterim(ir)));
+}
+/** Persists in-line reports — metadata to localStorage + Supabase, photos to IndexedDB. */
 async function saveInterimReports() {
-  // Upload any pending base64 photos to bucket first
-  if (typeof sb !== 'undefined') {
-    for (const ir of state.interimReports) {
-      try { await uploadPendingPhotosInterim(ir); } catch(e) {
-        console.warn('[AQL] Interim photo upload failed, keeping base64 for now:', e.message);
-      }
+  // Save photos to IndexedDB
+  for (const ir of state.interimReports) {
+    if (ir.photos && ir.photos.length) {
+      await idbSavePhotos(ir.id, ir.photos, {});
     }
   }
 
-  // Write URLs (not base64) to localStorage
-  try { localStorage.setItem(INTERIM_KEY, JSON.stringify(state.interimReports)); } catch(_) {}
+  // Strip photos before writing metadata anywhere
+  const stripped = state.interimReports.map(ir => ({ ...ir, photos: [] }));
+  try { localStorage.setItem(INTERIM_KEY, JSON.stringify(stripped)); } catch(_) {}
 
-  // Sync to Supabase DB
   if (typeof sb !== 'undefined') {
     for (const ir of state.interimReports) {
       try {
@@ -1142,8 +1240,8 @@ async function saveInterimReports() {
     }
   }
 }
-(function initInterim() {
-  state.interimReports = loadInterimReports();
+(async function initInterim() {
+  state.interimReports = await loadInterimReportsWithPhotos();
 })();
 
 // Download a full .json backup to device
@@ -1939,6 +2037,11 @@ function clearAllStorage() {
   try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
   try { localStorage.removeItem(INTERIM_KEY); } catch (_) {}
   try { localStorage.removeItem(CHECKLIST_KEY); } catch (_) {}
+  // Clear all photos from IndexedDB
+  idbOpen().then(db => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).clear();
+  }).catch(() => {});
   state.reports = [];
   state.interimReports = [];
   state.checklists = [];
@@ -2838,6 +2941,8 @@ async function deleteInterim(id) {
   const { customer, orderno } = state.interimReports[idx];
   state.interimReports.splice(idx, 1);
   saveInterimReports().catch(e => console.warn("[AQL] saveInterimReports failed:", e.message));
+  // Delete photos from IndexedDB
+  idbDeletePhotos(id);
   if (typeof sb !== 'undefined') {
     try { await sb.rest('DELETE', 'interim_reports', null, { id: `eq.${id}` }); } catch(e) { console.warn('[AQL] Delete interim failed:', e.message); }
   }
@@ -3475,6 +3580,8 @@ async function deleteReport(id) {
   state.reports.splice(index, 1);
   try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.reports)); } catch (_) {}
+  // Delete photos from IndexedDB
+  idbDeletePhotos(id);
   // Delete from Supabase too
   if (typeof sb !== 'undefined') {
     try { await sb.rest('DELETE', 'reports', null, { id: `eq.${id}` }); } catch (e) { console.warn('[AQL] Delete failed:', e.message); }
@@ -4875,8 +4982,8 @@ function reportToRow(r) {
     supplier_rep:           r.supplierRep,
     status:                 r.status,
     result:                 r.result,
-    defects:                r.defects  || {},
-    photos:                 r.photos   || [],
+    defects:                stripDefectPhotos(r.defects || {}),
+    photos:                 [],   // photos are session-only, never persisted
   };
 }
 
@@ -4991,7 +5098,7 @@ function interimToRow(ir) {
     aciklama:    ir.aciklama,
     supervisor_name: ir.supervisorName,
     qc_name:     ir.qcName,
-    photos:      ir.photos || [],
+    photos:      [],   // photos are session-only, never persisted
   };
 }
 
@@ -5052,10 +5159,11 @@ async function loadInterimReportsFromSupabase() {
     if (rows && rows.length) {
       const fromSupabase = rows.map(rowToInterim);
       const fromLocal    = loadInterimReports();
-      // Merge: Supabase is source of truth, add any local-only records
       const merged = [...fromSupabase];
       fromLocal.forEach(lr => { if (!merged.find(sr => sr.id === lr.id)) merged.push(lr); });
-      state.interimReports = merged;
+      // Merge photos from IndexedDB (device-local)
+      state.interimReports = await Promise.all(merged.map(ir => mergePhotosIntoInterim(ir)));
+      // Save metadata only to localStorage
       localStorage.setItem(INTERIM_KEY, JSON.stringify(merged));
       return;
     }
@@ -5085,8 +5193,11 @@ async function loadReportsFromSupabase() {
       limit:  String(MAX_STORED === Infinity ? 9999 : MAX_STORED),
     });
     if (rows && rows.length) {
-      state.reports = rows.map(rowToReport);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.reports));
+      const reports = rows.map(rowToReport);
+      // Merge photos from IndexedDB (device-local)
+      state.reports = await Promise.all(reports.map(r => mergePhotosIntoReport(r)));
+      // Save metadata only to localStorage (no photos)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(reports));
       showDashboard();
       return;
     }
