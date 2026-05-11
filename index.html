@@ -1477,18 +1477,42 @@ async function camFlip() {
   await camStartStream();
 }
 
-function camSnap() {
+async function camSnap() {
   const video = document.getElementById('cam-video');
   const canvas = document.getElementById('cam-snap');
   if (!video || !canvas) return;
-  // Use actual track settings for true resolution (videoWidth can be display-scaled)
+
   const track = camState.stream && camState.stream.getVideoTracks()[0];
+
+  // ImageCapture grabs a true still from the sensor — much sharper than drawImage(video)
+  if (track && typeof ImageCapture !== 'undefined') {
+    try {
+      const imageCapture = new ImageCapture(track);
+      const blob = await imageCapture.takePhoto();
+      const url = await new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.readAsDataURL(blob);
+      });
+      camClose();
+      editorOpen(url);
+      return;
+    } catch(e) {
+      // ImageCapture failed (some browsers/devices) — fall through to canvas fallback
+      console.warn('[AQL] ImageCapture failed, falling back to canvas:', e);
+    }
+  }
+
+  // Fallback: draw from video element
   const settings = track ? track.getSettings() : {};
   const w = settings.width  || video.videoWidth  || 1280;
   const h = settings.height || video.videoHeight || 720;
   canvas.width = w; canvas.height = h;
-  canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-  const url = canvas.toDataURL('image/jpeg', 0.92);  // slightly above save quality to preserve headroom through editor
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(video, 0, 0, w, h);
+  const url = canvas.toDataURL('image/jpeg', 0.92);
   camClose();
   editorOpen(url);
 }
