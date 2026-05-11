@@ -644,8 +644,8 @@ const CHECKLIST_PEOPLE_KEY = 'aql_checklist_people';
 const PEOPLE_DEFAULTS_KEY  = 'aql_people_defaults';
 const CUSTOMERS_KEY    = 'aql_customers';
 const MAX_STORED       = Infinity;
-const PHOTO_MAX_DIM    = 1200;
-const PHOTO_QUALITY    = 0.65;
+const PHOTO_MAX_DIM    = 1920;
+const PHOTO_QUALITY    = 0.88;
 const PRINT_DELAY_MS   = 300;
 const TOAST_DURATION   = 2000;
 
@@ -1475,7 +1475,7 @@ function camSnap() {
   let w = video.videoWidth || 1280, h = video.videoHeight || 720;
   canvas.width = w; canvas.height = h;
   canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-  const url = canvas.toDataURL('image/jpeg', 0.92);
+  const url = canvas.toDataURL('image/jpeg', 0.95);
   camClose();
   editorOpen(url);
 }
@@ -1680,7 +1680,8 @@ async function editorSave() {
   ctx.rotate(rot * Math.PI / 180);
   if (camState.flipH) ctx.scale(-1, 1);
   if (camState.flipV) ctx.scale(1, -1);
-  ctx.drawImage(img, -fullW / 2, -fullH / 2, fullW, fullH);
+  // Always draw the source image at its natural dimensions centred on origin
+  ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2, img.naturalWidth, img.naturalHeight);
   ctx.restore();
 
   let result = full;
@@ -1699,7 +1700,7 @@ async function editorSave() {
 
   document.getElementById('cam-editor').classList.remove('open');
 
-  const compressed = await compressImage(result.toDataURL('image/jpeg', 0.92));
+  const compressed = await compressImage(result.toDataURL('image/jpeg', 0.95));
   if (typeof camState.onSave === 'function') {
     camState.onSave(compressed);
   }
@@ -3084,10 +3085,10 @@ function buildInterimReportHTML(ir) {
       const header = start === 0
         ? '<div class="section-bar" style="margin-bottom:8px">FOTOĞRAFLAR · PHOTOS (' + photos.length + ')</div>'
         : '';
-      interimPhotoPages += '<div class="pdf-page">' + header +
+      interimPhotoPages += '<div class="pdf-page" style="break-inside:avoid;page-break-inside:avoid">' + header +
         '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">' +
         chunk.map(p =>
-          '<div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;background:#f9f9f9;display:flex;flex-direction:column">' +
+          '<div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;background:#f9f9f9;display:flex;flex-direction:column;break-inside:avoid;page-break-inside:avoid">' +
             '<div style="width:100%;height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f9f9f9">' +
               '<img src="' + (p.url||p) + '" style="max-width:100%;max-height:240px;width:auto;height:auto;display:block;object-fit:contain">' +
             '</div>' +
@@ -4323,12 +4324,12 @@ function _buildFinalPhotoAndNotesPages(r) {
       var label = p.label
         ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%">' + p.label + '</div>'
         : '';
-      return '<div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;background:#f9f9f9;display:flex;flex-direction:column">'
+      return '<div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;background:#f9f9f9;display:flex;flex-direction:column;break-inside:avoid;page-break-inside:avoid">'
         + '<div style="width:100%;height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f9f9f9">'
         + '<img src="' + p.url + '" style="max-width:100%;max-height:240px;width:auto;height:auto;display:block;object-fit:contain">'
         + '</div>' + label + '</div>';
     }).join('');
-    photoPages += '<div class="pdf-page">' + header
+    photoPages += '<div class="pdf-page" style="break-inside:avoid;page-break-inside:avoid">' + header
       + '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:4px">'
       + cells + '</div></div>';
   }
@@ -4350,7 +4351,7 @@ function _buildFinalPhotoAndNotesPages(r) {
       var noteHTML = d.note
         ? '<div style="margin-top:4px;font-style:italic;color:#374151">' + d.note + '</div>'
         : '';
-      notesCards += '<div style="border:1px solid #ccc;border-radius:6px;overflow:hidden">'
+      notesCards += '<div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;break-inside:avoid;page-break-inside:avoid">'
         + photoGrid
         + '<div style="padding:6px 8px;font-size:8px">'
         + '<div style="font-weight:700;font-family:monospace;color:#A6A6A6">' + item.code + '</div>'
