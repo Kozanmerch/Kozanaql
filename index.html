@@ -1488,7 +1488,15 @@ async function camSnap() {
   if (track && typeof ImageCapture !== 'undefined') {
     try {
       const imageCapture = new ImageCapture(track);
-      const blob = await imageCapture.takePhoto();
+      // Request max quality still from the sensor
+      const capabilities = imageCapture.getPhotoCapabilities ? await imageCapture.getPhotoCapabilities().catch(() => null) : null;
+      const photoSettings = {};
+      if (capabilities?.imageWidth?.max)  photoSettings.imageWidth  = capabilities.imageWidth.max;
+      if (capabilities?.imageHeight?.max) photoSettings.imageHeight = capabilities.imageHeight.max;
+      const blob = await imageCapture.takePhoto(photoSettings);
+      // Store the raw blob URL on camState so editorSave can skip re-encoding if no edits made
+      camState.rawBlob = blob;
+      camState._snapJustFired = true;
       const url = await new Promise(resolve => {
         const reader = new FileReader();
         reader.onload = e => resolve(e.target.result);
@@ -1502,6 +1510,7 @@ async function camSnap() {
       console.warn('[AQL] ImageCapture failed, falling back to canvas:', e);
     }
   }
+  camState.rawBlob = null;
 
   // Fallback: draw from video element
   const settings = track ? track.getSettings() : {};
@@ -1542,6 +1551,9 @@ function editorOpen(dataURL, onDone) {
   camState.cropActive = false;
   camState.cropRect  = null;
   camState.dragState = null;
+  // Only preserve rawBlob if it was set by camSnap — clear for upload paths
+  if (!camState._snapJustFired) camState.rawBlob = null;
+  camState._snapJustFired = false;
   const btn = document.getElementById('crop-toggle-btn');
   if (btn) btn.style.background = '';
 
@@ -1741,9 +1753,22 @@ async function editorSave() {
 
   document.getElementById('cam-editor').classList.remove('open');
 
-  // Output at full resolution with high quality — no second compression pass.
-  // compressImage() is only needed for raw uploads that may be very large.
-  // Re-encoding a JPEG a second time (lossy→lossy) degrades quality noticeably.
+  // If no edits were applied AND we have the original camera blob, use it directly.
+  // This avoids ANY canvas re-encode — the sensor JPEG goes straight to storage.
+  const noEdits = camState.rotation === 0 && !camState.flipH && !camState.flipV && !camState.cropActive;
+  if (noEdits && camState.rawBlob) {
+    const originalUrl = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.readAsDataURL(camState.rawBlob);
+    });
+    camState.rawBlob = null;
+    if (typeof camState.onSave === 'function') camState.onSave(originalUrl);
+    return;
+  }
+  camState.rawBlob = null;
+
+  // Edits were applied — re-encode from canvas at high quality
   const finalUrl = result.toDataURL('image/jpeg', PHOTO_QUALITY);
   if (typeof camState.onSave === 'function') {
     camState.onSave(finalUrl);
