@@ -1289,7 +1289,10 @@ function compressImage(dataUrl) {
       }
       const canvas = document.createElement('canvas');
       canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, w, h);
       resolve(canvas.toDataURL('image/jpeg', PHOTO_QUALITY));
     };
     img.onerror = () => resolve(dataUrl);
@@ -1549,6 +1552,8 @@ function editorDraw() {
   canvas.style.height = canvas.height + 'px';
 
   const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(canvas.width / 2, canvas.height / 2);
@@ -1685,6 +1690,8 @@ async function editorSave() {
   const full = document.createElement('canvas');
   full.width = fullW; full.height = fullH;
   const ctx = full.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.save();
   ctx.translate(fullW / 2, fullH / 2);
   ctx.rotate(rot * Math.PI / 180);
@@ -2986,9 +2993,9 @@ async function addInterimPhotos(input) {
   if (files.length === 1) {
     const reader = new FileReader();
     reader.onload = e => {
-      camState.onSave = async url => {
-        const compressed = await compressImage(url);
-        updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url: compressed, label: '' }); });
+      camState.onSave = url => {
+        // editorSave already outputs at full quality — no second compression pass
+        updateInterim(r => { if (!r.photos) r.photos = []; r.photos.push({ url, label: '' }); });
         _refreshInterimPhotoGrid();
         toast(t('📸 Photo saved'));
       };
