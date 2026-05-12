@@ -593,7 +593,7 @@ body {
     <!-- Native camera: hands off to the device camera app for full sensor quality -->
     <label style="display:flex;align-items:center;justify-content:center;cursor:pointer">
       <div class="cam-shutter" title="Take photo"></div>
-      <input type="file" accept="image/*" multiple style="display:none" onchange="camNativeSnap(this)">
+      <input type="file" accept="image/*" capture="environment" style="display:none" onchange="camNativeSnap(this)">
     </label>
     <div style="width:60px"></div>
   </div>
