@@ -3713,8 +3713,10 @@ function _triggerPDFDownload(htmlContent, filename, margin) {
 
           if (hasLabel) {
             try {
-              // Draw label using canvas 2D API — bypasses html2canvas font loading
-              // so Turkish/non-Latin characters always render correctly.
+              // Draw label via Canvas 2D — bypasses html2canvas font loading so all
+              // Turkish/non-Latin glyphs (ğ, ş, ı, ç, ö, ü …) always render correctly.
+              // Font size is shrunk to fit rather than using fillText maxWidth,
+              // which squishes glyphs and causes characters to appear missing.
               const labelText = labelEl.textContent.trim();
               const pxPerMm   = 3.7795;
               const lcW = Math.round(cellW * pxPerMm * 2);
@@ -3728,11 +3730,16 @@ function _triggerPDFDownload(htmlContent, filename, margin) {
               lctx.strokeStyle = '#dddddd';
               lctx.lineWidth = 1;
               lctx.beginPath(); lctx.moveTo(0, 0); lctx.lineTo(lcW, 0); lctx.stroke();
-              lctx.fillStyle  = '#374151';
-              lctx.font       = 'bold ' + Math.round(9 * 2) + 'px Arial, Helvetica, sans-serif';
-              lctx.textAlign  = 'center';
+              lctx.fillStyle    = '#374151';
+              lctx.textAlign    = 'center';
               lctx.textBaseline = 'middle';
-              lctx.fillText(labelText, lcW / 2, lcH / 2, lcW - 8);
+              let fontSize = 18;
+              lctx.font = 'bold ' + fontSize + 'px Arial, Helvetica, sans-serif';
+              while (lctx.measureText(labelText).width > lcW - 12 && fontSize > 10) {
+                fontSize -= 1;
+                lctx.font = 'bold ' + fontSize + 'px Arial, Helvetica, sans-serif';
+              }
+              lctx.fillText(labelText, lcW / 2, lcH / 2);
               pdf.addImage(lc.toDataURL('image/jpeg', 0.95), 'JPEG', x, y + cellH - labelH, cellW, labelH);
             } catch(e) { console.warn('[AQL] Label render failed:', e); }
           }
