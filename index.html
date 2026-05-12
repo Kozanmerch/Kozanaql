@@ -2853,10 +2853,10 @@ function buildChecklistPDF(cl) {
   return `<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
 <style>
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:'DM Sans',Arial,sans-serif; font-size:8.5px; color:#111; background:#fff; }
+  body { font-family:Arial,Helvetica,sans-serif; font-size:8.5px; color:#111; background:#fff; }
   table { border-collapse:collapse; width:100%; }
   th { text-align:left; }
   html, body { width:210mm; margin:0 auto; }
@@ -3506,10 +3506,10 @@ function buildInterimReportHTML(ir) {
   return `<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
 <style>
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:'DM Sans',Arial,sans-serif; font-size:8.5px; color:#111; background:#fff; }
+  body { font-family:Arial,Helvetica,sans-serif; font-size:8.5px; color:#111; background:#fff; }
   table { border-collapse:collapse; width:100%; table-layout:fixed; }
   td,th { border:1px solid #ccc; vertical-align:top; padding:0; overflow:hidden; word-break:break-word; }
   .section-bar { background:#A6A6A6; color:#000; font-size:8px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; padding:3px 6px; text-indent:1em; }
@@ -4922,10 +4922,10 @@ async function buildPrintHTML() {
 <html><head>
 <meta charset="UTF-8">
 <title>${(r.customer||'AQL').replace(/[^a-zA-Z0-9]/g,'_')}_${(r.orderno||'Report').replace(/[^a-zA-Z0-9]/g,'_')}</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
 <style>
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:'DM Sans',Arial,sans-serif; font-size:8.5px; color:#111; background:#fff; }
+  body { font-family:Arial,Helvetica,sans-serif; font-size:8.5px; color:#111; background:#fff; }
   table { border-collapse:collapse; width:100%; table-layout:fixed; }
   td,th { border:1px solid #ccc; vertical-align:top; padding:0; overflow:hidden; word-break:break-word; }
   .header-bar { background:#A6A6A6; color:#000; padding:5px 10px; display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; }
