@@ -593,7 +593,7 @@ body {
     <!-- Native camera: hands off to the device camera app for full sensor quality -->
     <label style="display:flex;align-items:center;justify-content:center;cursor:pointer">
       <div class="cam-shutter" title="Take photo"></div>
-      <input type="file" accept="image/*" capture="environment" style="display:none" onchange="camNativeSnap(this)">
+      <input type="file" accept="image/*" multiple style="display:none" onchange="camNativeSnap(this)">
     </label>
     <div style="width:60px"></div>
   </div>
@@ -1764,13 +1764,21 @@ async function camSnap() {
 }
 
 async function camNativeSnap(input) {
-  const file = input.files[0];
-  if (!file) return;
+  const files = Array.from(input.files);
+  if (!files.length) return;
   camClose();
-  const reader = new FileReader();
-  reader.onload = e => editorOpen(e.target.result);
-  reader.readAsDataURL(file);
-  // Reset input so same file can be re-selected
+  for (const file of files) {
+    await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        // Save directly — no editor on upload. Edit button opens editor later.
+        if (typeof camState.onSave === 'function') camState.onSave(e.target.result);
+        resolve();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  // Reset input so same files can be re-selected
   input.value = '';
 }
 
@@ -1778,17 +1786,16 @@ async function camUpload(input) {
   camClose();
   const files = Array.from(input.files);
   for (const file of files) {
-    // Bug 3 fix: store resolve in camState so editorSave/editorDiscard can call it
     await new Promise(resolve => {
       const reader = new FileReader();
       reader.onload = e => {
-        camState._multiUploadResolve = resolve;
-        editorOpen(e.target.result);
+        // Save directly — no editor on upload. Edit button opens editor later.
+        if (typeof camState.onSave === 'function') camState.onSave(e.target.result);
+        resolve();
       };
       reader.readAsDataURL(file);
     });
   }
-  camState._multiUploadResolve = null;
 }
 
 // ── Photo editor ─────────────────────────────────────────────────────
@@ -2017,8 +2024,6 @@ async function editorSave() {
   if (noEdits && camState.originalDataURL) {
     document.getElementById('cam-editor').classList.remove('open');
     if (typeof camState.onSave === 'function') camState.onSave(camState.originalDataURL);
-    // Bug 3 fix: advance camUpload multi-file loop
-    if (typeof camState._multiUploadResolve === 'function') { camState._multiUploadResolve(); camState._multiUploadResolve = null; }
     return;
   }
 
@@ -2070,15 +2075,11 @@ async function editorSave() {
     : result.toDataURL('image/webp', 0.80);
 
   if (typeof camState.onSave === 'function') camState.onSave(finalUrl);
-  // Bug 3 fix: advance camUpload multi-file loop
-  if (typeof camState._multiUploadResolve === 'function') { camState._multiUploadResolve(); camState._multiUploadResolve = null; }
 }
 
 function editorDiscard() {
   document.getElementById('cam-editor').classList.remove('open');
   camState.srcImage = null;
-  // Bug 3 fix: if discarding mid multi-upload, advance the loop so remaining files still open
-  if (typeof camState._multiUploadResolve === 'function') { camState._multiUploadResolve(); camState._multiUploadResolve = null; }
 }
 
 // ══════════════════════════════════════════════════════════════════════
