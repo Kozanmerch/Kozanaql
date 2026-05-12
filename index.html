@@ -3488,7 +3488,7 @@ function buildInterimReportHTML(ir) {
             '<div style="width:100%;height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f9f9f9">' +
               '<img src="' + (p.url||p) + '" style="max-width:100%;max-height:240px;width:auto;height:auto;display:block;object-fit:contain">' +
             '</div>' +
-            (p.label ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%">' + t(p.label) + '</div>' : '') +
+            (p.label ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%;font-family:Arial,Helvetica,sans-serif">' + t(p.label) + '</div>' : '') +
           '</div>'
         ).join('') +
         '</div></div>';
@@ -3713,7 +3713,26 @@ function _triggerPDFDownload(htmlContent, filename, margin) {
 
           if (hasLabel) {
             try {
-              const lc = await html2canvas(labelEl, { scale:2, useCORS:true, logging:false, backgroundColor:'#f0f0f0', width: labelEl.offsetWidth || 380, windowWidth:794 });
+              // Draw label using canvas 2D API — bypasses html2canvas font loading
+              // so Turkish/non-Latin characters always render correctly.
+              const labelText = labelEl.textContent.trim();
+              const pxPerMm   = 3.7795;
+              const lcW = Math.round(cellW * pxPerMm * 2);
+              const lcH = Math.round(labelH * pxPerMm * 2);
+              const lc  = document.createElement('canvas');
+              lc.width  = lcW;
+              lc.height = lcH;
+              const lctx = lc.getContext('2d');
+              lctx.fillStyle = '#f0f0f0';
+              lctx.fillRect(0, 0, lcW, lcH);
+              lctx.strokeStyle = '#dddddd';
+              lctx.lineWidth = 1;
+              lctx.beginPath(); lctx.moveTo(0, 0); lctx.lineTo(lcW, 0); lctx.stroke();
+              lctx.fillStyle  = '#374151';
+              lctx.font       = 'bold ' + Math.round(9 * 2) + 'px Arial, Helvetica, sans-serif';
+              lctx.textAlign  = 'center';
+              lctx.textBaseline = 'middle';
+              lctx.fillText(labelText, lcW / 2, lcH / 2, lcW - 8);
               pdf.addImage(lc.toDataURL('image/jpeg', 0.95), 'JPEG', x, y + cellH - labelH, cellW, labelH);
             } catch(e) { console.warn('[AQL] Label render failed:', e); }
           }
@@ -4823,7 +4842,7 @@ function _buildFinalPhotoAndNotesPages(r) {
     var cells = chunk.map(function(p) {
       var displayLabel = p.label ? (typeof t === 'function' ? t(p.label) : p.label) : '';
       var label = displayLabel
-        ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%">' + displayLabel + '</div>'
+        ? '<div style="font-size:9px;font-weight:700;color:#374151;text-align:center;padding:3px 4px;background:#f0f0f0;border-top:1px solid #ddd;width:100%;font-family:Arial,Helvetica,sans-serif">' + displayLabel + '</div>'
         : '';
       return '<div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;background:#f9f9f9;display:flex;flex-direction:column;break-inside:avoid;page-break-inside:avoid">'
         + '<div style="width:100%;height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f9f9f9">'
