@@ -1830,10 +1830,17 @@ function editorDraw() {
   const drawW = swapped ? srcH : srcW;
   const drawH = swapped ? srcW : srcH;
 
-  // Fit to container in CSS pixels first
-  const container = document.getElementById('cam-editor-img');
-  const maxW = container.clientWidth  || window.innerWidth;
-  const maxH = container.clientHeight || (window.innerHeight - 160);
+  // Fit to available screen space.
+  // We derive available size from the window rather than container.clientWidth/Height
+  // because after a 90°/270° rotation the container hasn't reflowed yet and returns
+  // the OLD (wrong) dimensions, causing the canvas to scale based on the previous
+  // orientation. Using window dimensions is always correct and reflow-independent.
+  const editorTopbar = document.querySelector('.cam-editor-topbar');
+  const camToolbar   = document.querySelector('.cam-toolbar');
+  const chromeH = (editorTopbar ? editorTopbar.offsetHeight : 52)
+                + (camToolbar   ? camToolbar.offsetHeight   : 72);
+  const maxW = window.innerWidth;
+  const maxH = Math.max(window.innerHeight - chromeH, 120);
   const cssScale = Math.min(maxW / drawW, maxH / drawH, 1);
 
   // Multiply canvas backing store by DPR so it has real physical pixels.
@@ -1880,8 +1887,20 @@ function editorDraw() {
 function editorRotate(deg) {
   camState.rotation = (camState.rotation + deg + 360) % 360;
   camState.cropRect = null;
-  editorDraw();
+  // Use rAF so the browser can flush any pending layout before we measure window dims
+  requestAnimationFrame(editorDraw);
 }
+
+// Redraw when the device/window is resized or rotated
+window.addEventListener('resize', () => {
+  if (document.getElementById('cam-editor').classList.contains('open')) editorDraw();
+});
+window.addEventListener('orientationchange', () => {
+  if (document.getElementById('cam-editor').classList.contains('open')) {
+    // orientationchange fires before the new dimensions settle; wait one frame
+    requestAnimationFrame(editorDraw);
+  }
+});
 
 function editorFlipH() { camState.flipH = !camState.flipH; editorDraw(); }
 function editorFlipV() { camState.flipV = !camState.flipV; editorDraw(); }
@@ -1901,7 +1920,11 @@ function editorToggleCrop() {
   if (camState.cropActive && !camState.cropRect) {
     const canvas = document.getElementById('editor-canvas');
     const p = 24;
-    camState.cropRect = { x: p, y: p, w: canvas.width - p*2, h: canvas.height - p*2 };
+    // Use CSS pixel dimensions (style.width/height), NOT canvas.width/height which are
+    // scaled by DPR. cropRect is always in CSS px space to match the overlay positioning.
+    const cssW = parseFloat(canvas.style.width)  || canvas.offsetWidth;
+    const cssH = parseFloat(canvas.style.height) || canvas.offsetHeight;
+    camState.cropRect = { x: p, y: p, w: cssW - p*2, h: cssH - p*2 };
   }
   if (!camState.cropActive) camState.cropRect = null;
   editorDraw();
@@ -2580,8 +2603,15 @@ async function deleteChecklist(id) {
   const { customer, orderno } = cl;
   state.checklists = state.checklists.filter(c => c.id !== id);
   saveChecklists().catch(e => console.warn("[AQL] saveChecklists failed:", e.message));
+  delete _syncCache.checklists[id];
   if (typeof sb !== 'undefined') {
-    try { await sb.rest('DELETE', 'checklists', null, { id: `eq.${id}` }); } catch(e) { console.warn('[AQL] Delete checklist failed:', e.message); }
+    try {
+      await sb.rest('DELETE', 'checklists', null, { id: `eq.${id}` });
+      toast(t('☁️ Checklist deleted from cloud.'), 3000);
+    } catch(e) {
+      console.warn('[AQL] Delete checklist failed:', e.message);
+      toast(t('⚠️ Cloud delete failed — checklist may reappear on next sync.'), 5000);
+    }
   }
   openOrderHub(encodeURIComponent(customer), encodeURIComponent(orderno));
 }
@@ -2917,7 +2947,7 @@ function openOrderHub(customerEnc, ordernoEnc) {
   const checks   = state.checklists.filter(c => c.customer === customer && c.orderno === orderno);
   const ref = finals[0] || interims[0];
 
-  const MAX_INTERIM = 3;
+  const MAX_INTERIM = 10;
   const MAX_FINAL = 3;
   const MAX_CHECKLIST = 1;
   const canAddInterim   = interims.length < MAX_INTERIM;
@@ -3103,8 +3133,15 @@ async function deleteInterim(id) {
   saveInterimReports().catch(e => console.warn("[AQL] saveInterimReports failed:", e.message));
   // Delete photos from IndexedDB
   idbDeletePhotos(id);
+  delete _syncCache.interim[id];
   if (typeof sb !== 'undefined') {
-    try { await sb.rest('DELETE', 'interim_reports', null, { id: `eq.${id}` }); } catch(e) { console.warn('[AQL] Delete interim failed:', e.message); }
+    try {
+      await sb.rest('DELETE', 'interim_reports', null, { id: `eq.${id}` });
+      toast(t('☁️ In-Line report deleted from cloud.'), 3000);
+    } catch(e) {
+      console.warn('[AQL] Delete interim failed:', e.message);
+      toast(t('⚠️ Cloud delete failed — report may reappear on next sync.'), 5000);
+    }
   }
   openOrderHub(encodeURIComponent(customer), encodeURIComponent(orderno));
 }
@@ -3747,9 +3784,16 @@ async function deleteReport(id) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.reports)); } catch (_) {}
   // Delete photos from IndexedDB
   idbDeletePhotos(id);
-  // Delete from Supabase too
+  // Delete from Supabase and clear sync cache so it can't be re-pulled
+  delete _syncCache.reports[id];
   if (typeof sb !== 'undefined') {
-    try { await sb.rest('DELETE', 'reports', null, { id: `eq.${id}` }); } catch (e) { console.warn('[AQL] Delete failed:', e.message); }
+    try {
+      await sb.rest('DELETE', 'reports', null, { id: `eq.${id}` });
+      toast(t('☁️ Report deleted from cloud.'), 3000);
+    } catch (e) {
+      console.warn('[AQL] Delete failed:', e.message);
+      toast(t('⚠️ Cloud delete failed — report may reappear on next sync.'), 5000);
+    }
   }
   openOrderHub(encodeURIComponent(customer), encodeURIComponent(orderno));
 }
@@ -4429,11 +4473,19 @@ function compressPhotoUrl(url, label) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
+      const MAX_DIM = 1600;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > MAX_DIM || h > MAX_DIM) {
+        if (w >= h) { h = Math.round(h * MAX_DIM / w); w = MAX_DIM; }
+        else        { w = Math.round(w * MAX_DIM / h); h = MAX_DIM; }
+      }
       const canvas = document.createElement('canvas');
-      canvas.width  = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      canvas.width  = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, w, h);
       resolve(canvas.toDataURL('image/jpeg', 0.85));
     };
     img.onerror = () => resolve(url); // fallback: keep original
