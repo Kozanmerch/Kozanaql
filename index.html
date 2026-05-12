@@ -3650,23 +3650,23 @@ function _triggerPDFDownload(htmlContent, filename, margin) {
       const contentW = pageW - margin * 2;
       const contentH = pageH - margin * 2;
 
-      // A page is a "photo page" if it contains the photo section bar or multiple large images
+      // Photo pages: section-bar matches PHOTO/FOTOĞRAF AND has at least one real image.
+      // Zero-photo placeholder pages must fall through to html2canvas to preserve their text.
       function isPhotoPage(pg) {
         const bar = pg.querySelector('.section-bar');
-        if (bar && (bar.textContent.includes('PHOTO') || bar.textContent.includes('FOTOĞRAF'))) return true;
-        // Also detect by counting large data-URI images (more than 1 means it's a photo grid, not just a logo)
-        const largeImgs = Array.from(pg.querySelectorAll('img')).filter(
+        if (!bar) return false;
+        if (!bar.textContent.includes('PHOTO') && !bar.textContent.includes('FOTOĞRAF')) return false;
+        return Array.from(pg.querySelectorAll('img')).some(
           img => img.src && img.src.length > 5000 && img.naturalWidth > 200
         );
-        return largeImgs.length > 1;
       }
 
-      // Inject photos directly into jsPDF — bypasses html2canvas entirely
+      // Injects photos directly into jsPDF at full resolution (bypasses html2canvas).
+      // Section-bar and labels are captured via html2canvas so non-Latin chars render correctly.
       async function renderPhotoPageDirect(pg, isFirst) {
         if (!isFirst) pdf.addPage();
 
-        // Render any section-bar header text via html2canvas (tiny, no quality loss)
-        const bar = pg.querySelector('.section-bar');
+        const bar  = pg.querySelector('.section-bar');
         const barH = bar ? 7 : 0;
         if (bar) {
           const bc = await html2canvas(bar, { scale:2, useCORS:true, logging:false, backgroundColor:'#A6A6A6', width:794, windowWidth:794 });
@@ -3681,44 +3681,43 @@ function _triggerPDFDownload(htmlContent, filename, margin) {
         const gap    = 3;
         const cellW  = (contentW - gap) / cols;
         const cellH  = 86;
+        const labelH = 7;
         const startY = margin + barH + (bar ? 2 : 0);
 
-        photos.forEach((img, i) => {
-          const col = i % cols;
-          const row = Math.floor(i / cols);
-          const x   = margin + col * (cellW + gap);
-          const y   = startY + row * (cellH + gap);
+        for (let i = 0; i < photos.length; i++) {
+          const img     = photos[i];
+          const col     = i % cols;
+          const row     = Math.floor(i / cols);
+          const x       = margin + col * (cellW + gap);
+          const y       = startY + row * (cellH + gap);
+          // DOM structure: cell > img-wrap > img  +  cell > label-div?
+          const cell    = img.parentElement && img.parentElement.parentElement;
+          const labelEl = cell && cell.querySelector('div[style*="background:#f0f0f0"], div[style*="background:#F0F0F0"]');
+          const hasLabel = !!(labelEl && labelEl.textContent.trim());
+          const photoH  = hasLabel ? cellH - labelH : cellH;
 
-          // Cell border
           pdf.setDrawColor(200, 200, 200);
           pdf.setLineWidth(0.2);
           pdf.rect(x, y, cellW, cellH);
 
-          // Fit image preserving aspect ratio
-          const iw = img.naturalWidth  || 1;
-          const ih = img.naturalHeight || 1;
-          const photoH = cellH - 7; // reserve bottom for label
-          const scale  = Math.min(cellW / iw, photoH / ih);
-          const dw = iw * scale;
-          const dh = ih * scale;
-          const dx = x + (cellW - dw) / 2;
-          const dy = y + (photoH - dh) / 2;
-
+          const iw    = img.naturalWidth  || 1;
+          const ih    = img.naturalHeight || 1;
+          const scale = Math.min(cellW / iw, photoH / ih);
+          const dw    = iw * scale;
+          const dh    = ih * scale;
+          const dx    = x + (cellW - dw) / 2;
+          const dy    = y + (photoH  - dh) / 2;
           try {
-            const fmt = img.src.startsWith('data:image/png') ? 'PNG' : 'JPEG';
-            pdf.addImage(img.src, fmt, dx, dy, dw, dh);
+            pdf.addImage(img.src, img.src.startsWith('data:image/png') ? 'PNG' : 'JPEG', dx, dy, dw, dh);
           } catch(e) { console.warn('[AQL] Photo embed failed:', e); }
 
-          // Label text at bottom of cell — find it within the same grid cell as the image
-          const cellContainer = img.closest('div[style*="flex-direction:column"], div[style*="flex-direction: column"]');
-          const labelEl = cellContainer && cellContainer.querySelector('div[style*="background:#f0f0f0"], div[style*="background:#F0F0F0"]');
-          const label   = labelEl ? labelEl.textContent.trim() : '';
-          if (label) {
-            pdf.setFontSize(6.5);
-            pdf.setTextColor(80, 80, 80);
-            pdf.text(label, x + cellW / 2, y + cellH - 1.5, { align:'center', maxWidth: cellW - 2 });
+          if (hasLabel) {
+            try {
+              const lc = await html2canvas(labelEl, { scale:2, useCORS:true, logging:false, backgroundColor:'#f0f0f0', width: labelEl.offsetWidth || 380, windowWidth:794 });
+              pdf.addImage(lc.toDataURL('image/jpeg', 0.95), 'JPEG', x, y + cellH - labelH, cellW, labelH);
+            } catch(e) { console.warn('[AQL] Label render failed:', e); }
           }
-        });
+        }
       }
 
       if (!pages || pages.length === 0) {
