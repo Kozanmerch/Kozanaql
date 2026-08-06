@@ -1758,7 +1758,7 @@ async function camSnap() {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(video, 0, 0, w, h);
-  const url = canvas.toDataURL('image/jpeg', 1.0);
+  const url = canvas.toDataURL('image/jpeg', 3.0);
   camClose();
   editorOpen(url);
 }
